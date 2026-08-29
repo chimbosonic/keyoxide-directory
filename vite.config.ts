@@ -10,14 +10,33 @@ export default defineConfig({
     // Flat static output: index.html plus hashed assets, no server routing.
     assetsDir: 'assets',
   },
-  resolve: {
-    // Svelte's browser build is required when components render under jsdom.
-    conditions: ['browser'],
-  },
   test: {
-    environment: 'jsdom',
-    globals: true,
-    setupFiles: ['./tests/setup.ts'],
-    include: ['src/**/*.test.ts', 'tests/unit/**/*.test.ts'],
+    projects: [
+      {
+        // Library code runs under node. OpenPGP.js cannot be loaded in jsdom:
+        // jsdom's Uint8Array belongs to a different realm, which fails the
+        // instanceof checks inside its stream helpers at import time.
+        extends: true,
+        test: {
+          name: 'lib',
+          environment: 'node',
+          globals: true,
+          include: ['src/lib/**/*.test.ts'],
+        },
+      },
+      {
+        // Components need jsdom, and Svelte needs the browser export condition
+        // to render there.
+        extends: true,
+        resolve: { conditions: ['browser'] },
+        test: {
+          name: 'ui',
+          environment: 'jsdom',
+          globals: true,
+          setupFiles: ['./tests/setup.ts'],
+          include: ['src/components/**/*.test.ts', 'tests/unit/**/*.test.ts'],
+        },
+      },
+    ],
   },
 })
