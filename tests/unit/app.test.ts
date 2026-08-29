@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from '@testing-library/svelte'
+import { render, screen, waitFor, within } from '@testing-library/svelte'
 import App from '../../src/App.svelte'
 import { PROJECT_INSTANCE } from '../../src/lib/project'
+import { ADD_INSTANCE_URL, KEYS_FILE_URL } from '../../src/lib/repository'
 import type { ResolvedInstance } from '../../src/lib/resolve'
 import type { KeyEntry } from '../../src/lib/validateKeys'
 
@@ -34,6 +35,35 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByTestId('empty')).toBeInTheDocument())
     expect(screen.getAllByRole('article')).toHaveLength(1)
     expect(screen.getByRole('link', { name: 'keyoxide.org' })).toBeInTheDocument()
+  })
+
+  it('always offers a route to adding an instance, not only when the list is empty', async () => {
+    const resolver = async () => [resolved('https://one.example.org')]
+
+    render(App, { entries: [], resolver })
+
+    await waitFor(() => expect(screen.queryByTestId('empty')).toBeNull())
+
+    const cta = screen.getByTestId('add-instance')
+    expect(cta).toHaveTextContent(/add it to the directory/i)
+    expect(within(cta).getByRole('link', { name: /add it to the directory/i })).toHaveAttribute(
+      'href',
+      ADD_INSTANCE_URL,
+    )
+    expect(within(cta).getByRole('link', { name: 'src/data/keys.json' })).toHaveAttribute(
+      'href',
+      KEYS_FILE_URL,
+    )
+  })
+
+  it('links the empty state to the same instructions', async () => {
+    render(App, { entries: [], resolver: async () => [] })
+
+    const empty = await screen.findByTestId('empty')
+    expect(within(empty).getByRole('link', { name: 'opening a pull request' })).toHaveAttribute(
+      'href',
+      ADD_INSTANCE_URL,
+    )
   })
 
   it('renders a card per resolved entry, after the pinned one', async () => {

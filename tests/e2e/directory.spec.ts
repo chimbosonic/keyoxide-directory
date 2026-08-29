@@ -143,6 +143,17 @@ test.describe('directory', () => {
     await expect(page.getByTestId('summary')).toHaveText('0 of 0 verified')
   })
 
+  test('offers a route to adding an instance', async ({ page }) => {
+    await loadDirectory(page)
+
+    const cta = page.getByTestId('add-instance')
+    await expect(cta).toBeVisible()
+    await expect(cta.getByRole('link', { name: /add it to the directory/i })).toHaveAttribute(
+      'href',
+      /github\.com\/chimbosonic\/keyoxide-directory/,
+    )
+  })
+
   test('marks a deployment that answers as online', async ({ page }) => {
     await loadDirectory(page)
 

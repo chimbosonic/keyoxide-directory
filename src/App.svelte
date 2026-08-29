@@ -3,6 +3,7 @@
   import { loadEntries } from './lib/entries'
   import { probeAll, type Liveness } from './lib/probe'
   import { PROJECT_INSTANCE, projectCard } from './lib/project'
+  import { ADD_INSTANCE_URL, KEYS_FILE_URL } from './lib/repository'
   import type { DirectoryCard, ResolvedInstance } from './lib/resolve'
   import type { KeyEntry } from './lib/validateKeys'
 
@@ -87,17 +88,25 @@
 
       {#if instances.length === 0}
         <p class="panel spaced" data-testid="empty">
-          No instances listed yet. Add yours by opening a pull request against
-          <span class="code inline">src/data/keys.json</span>.
+          No instances listed yet. Add yours by
+          <a href={ADD_INSTANCE_URL}>opening a pull request</a> against
+          <a class="code inline" href={KEYS_FILE_URL}>src/data/keys.json</a>.
         </p>
       {/if}
     {/if}
   </section>
 
   <footer>
-    Keys are fetched by your browser, from
-    <a href="https://keys.openpgp.org">keys.openpgp.org</a> or the operator's own Web Key
-    Directory. Operator addresses are never stored or shown.
+    <p class="cta" data-testid="add-instance">
+      Run a Keyoxide deployment?
+      <a href={ADD_INSTANCE_URL}>Add it to the directory</a> — it is a one-entry pull
+      request against <a class="code inline" href={KEYS_FILE_URL}>src/data/keys.json</a>.
+    </p>
+    <p>
+      Keys are fetched by your browser, from
+      <a href="https://keys.openpgp.org">keys.openpgp.org</a> or the operator's own Web Key
+      Directory. Operator addresses are never stored or shown.
+    </p>
   </footer>
 </div>
 
@@ -109,5 +118,13 @@
 
   .spaced {
     margin-top: 16px;
+  }
+
+  footer p {
+    margin: 0;
+  }
+
+  .cta {
+    margin-bottom: 6px;
   }
 </style>
