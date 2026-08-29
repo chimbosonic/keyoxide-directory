@@ -2,8 +2,8 @@
 
 A directory of [Keyoxide](https://keyoxide.org) deployments, built entirely in
 the browser. There is no backend: the page ships with a list of operator key
-identifiers, fetches each key from a keyserver, and reads a notation off the key
-in which the operator claims the deployment they run.
+identifiers, fetches each key, and reads a notation off the key in which the
+operator claims the deployment they run.
 
 **[Add your deployment](.github/pull_request_template.md)** — it is a one-entry
 change to `src/data/keys.json`.
@@ -31,9 +31,9 @@ Two independent pills:
 | **verified** | the key's notation matches the declared deployment |
 | **claims another deployment** | the key carries a notation, for somewhere else |
 | **no claim on key** | the key was fetched but carries no notation |
-| **key not found** | the keyserver has no such key |
+| **key not found** | the source has no such key: the keyserver does not hold it, or the domain publishes none |
 | **key unreadable** | the key was fetched but could not be parsed |
-| **lookup failed** | network, CORS, or a keyserver error |
+| **lookup failed** | network, CORS, or a server error |
 
 and separately whether the deployment answered: **online**, **unreachable**, or
 **no answer yet**. The two are kept apart because a deployment can be up while
@@ -44,6 +44,28 @@ rejects only on a connection failure. A timeout is reported as *no answer yet*
 rather than unreachable — a healthy deployment that simply does not allow this
 origin must not be labelled down.
 
+## Where keys are fetched from
+
+Each entry names its own lookup, so the two routes are never confused:
+
+| `type` | identified by | fetched from |
+|---|---|---|
+| `hkp` | `fingerprint` | keys.openpgp.org, over VKS |
+| `wkd` | `domain` + `hash` | that domain's Web Key Directory |
+
+keys.openpgp.org sends `access-control-allow-origin: *` on every VKS endpoint,
+which is what makes a directory with no backend possible. The `hkp` name follows
+Keyoxide's own URL vocabulary; the transport is really VKS, its REST interface,
+not the HKP protocol.
+
+A `wkd` entry is tried at the advanced URL first and the direct URL second, the
+order the spec prescribes. There is no fallback between the two *types*: VKS can
+look a key up only by fingerprint or by a plaintext address, and a `wkd` entry
+stores neither, so if WKD does not answer there is nothing else to try. WKD also
+depends on the operator's own server sending CORS headers, which many do not —
+that is a real cost of the route, paid in exchange for not putting an address in
+this repository.
+
 ## Privacy
 
 The directory never renders a user id, an email address, or even a full
@@ -52,20 +74,16 @@ grouped. User ids are absent from the parse result's type entirely, so they
 cannot reach the page by accident, and both the unit and browser suites assert
 that no address appears in the DOM.
 
-Entries listed by `email` are the exception, and it is worth understanding: that
-address sits in plaintext in this public repository and in the shipped bundle.
-Identify yourself by fingerprint if you would rather it did not.
+No address is stored either. A `wkd` entry carries the z-base-32 SHA-1 of the
+local part, which is all a WKD URL is built from, so nothing in this repository
+or the shipped bundle is an address. `npm run wkd-hash <address>` computes it
+locally and sends nothing anywhere.
 
-## Keys are fetched from keys.openpgp.org
-
-It is the only source, for both fingerprint and email entries. It sends
-`access-control-allow-origin: *` on every VKS endpoint, which is what makes a
-directory with no backend possible.
-
-Web Key Directory would have been the natural route for email entries, but the
-CORS header there is each domain's own server configuration and most do not send
-it, so a client-side WKD lookup would fail for most operators through no fault of
-their own.
+Be clear-eyed about what that hash buys, though: it is an unsalted SHA-1 of a
+lowercased local part, sitting next to the domain in the clear. It stops a
+scraper's regex, not someone willing to run a wordlist of common local parts. An
+`hkp` entry, which derives nothing from an address at all, is the stronger
+choice.
 
 ## Development
 
@@ -75,6 +93,7 @@ $ npm run dev            # local dev server
 $ npm run test:unit      # Vitest: library and component tests
 $ npm run test:e2e       # Playwright, against the production build
 $ npm run validate:keys  # schema-check src/data/keys.json
+$ npm run wkd-hash <addr> # print the wkd entry for an address
 $ npm run check          # svelte-check
 $ npm run build          # -> dist/
 ```
@@ -86,7 +105,12 @@ jsdom with the browser export condition Svelte needs.
 
 Key fixtures under `tests/fixtures/keys` are real keys generated with gpg in a
 throwaway keyring, so the parser is tested against packets GnuPG actually emits.
-Their user ids use `@example.invalid` addresses.
+Their user ids use `@example.invalid` addresses. `claimed.gpg` is `claimed.asc`
+run through `gpg --dearmor`: the same key in the unarmored form WKD serves.
+
+The z-base-32 hashing is checked against the worked example published in
+draft-koch-openpgp-webkey-service, so the directory cannot drift into looking
+somewhere no other WKD client would.
 
 `dist/` is a flat static bundle — `index.html` plus hashed assets, relative
 `base`, no server-side routing — and is uploaded as-is to Cloudflare R2.

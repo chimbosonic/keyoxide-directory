@@ -31,10 +31,10 @@ async function stubKeyserver(page: Page) {
 }
 
 const ENTRIES = [
-  { fingerprint: CLAIMED, instance: 'https://kx.example.org' },
-  { fingerprint: CLAIMED, instance: 'https://elsewhere.example.org' },
-  { fingerprint: PLAIN, instance: 'https://plain.example.org' },
-  { fingerprint: MISSING, instance: 'https://gone.example.org' },
+  { type: 'hkp', fingerprint: CLAIMED, instance: 'https://kx.example.org' },
+  { type: 'hkp', fingerprint: CLAIMED, instance: 'https://elsewhere.example.org' },
+  { type: 'hkp', fingerprint: PLAIN, instance: 'https://plain.example.org' },
+  { type: 'hkp', fingerprint: MISSING, instance: 'https://gone.example.org' },
 ]
 
 /**

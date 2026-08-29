@@ -9,9 +9,29 @@ const fixture = (name: string) =>
 const CLAIMED_FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 const PLAIN_FPR = 'E9B57E7488818FE8A72CB8A20A6899A0D2FBBD4E'
 
-const entry = (instance: string): KeyEntry => ({ fingerprint: '3AA5C34371567BD2', instance })
+const entry = (instance: string): KeyEntry => ({
+  type: 'hkp',
+  fingerprint: '3AA5C34371567BD2',
+  instance,
+})
+
+const HASH = 'ybndrfg8ejkmcpqxot1uwisza345h769'
+
+const wkdEntry = (instance: string): KeyEntry => ({
+  type: 'wkd',
+  domain: 'example.net',
+  hash: HASH,
+  instance,
+})
+
+/** The same key WKD would serve: the armored fixture with its armor stripped. */
+const binaryFixture = (name: string) =>
+  new Uint8Array(readFileSync(resolvePath(__dirname, '../../tests/fixtures/keys', `${name}.gpg`)))
 
 const serving = (body: string, status = 200) => vi.fn(async () => new Response(body, { status }))
+
+/** fetch is overloaded and takes more than a string, so mocks must match its signature. */
+type FetchInput = Parameters<typeof globalThis.fetch>[0]
 
 describe('normalizeInstanceUrl', () => {
   it('strips a trailing slash', () => {
@@ -112,6 +132,65 @@ describe('resolveEntry', () => {
     })
 
     expect(result.status).toBe('unreadable')
+  })
+
+  it('resolves a wkd entry from its domain, not the keyserver', async () => {
+    const fetchImpl = vi.fn(async (_input: FetchInput) =>
+      new Response(binaryFixture('claimed'), { status: 200 }),
+    )
+    const result = await resolveEntry(wkdEntry('https://kx.example.org'), { fetch: fetchImpl })
+
+    expect(result.status).toBe('verified')
+    expect(result.fingerprint).toBe(CLAIMED_FPR)
+
+    const requested = fetchImpl.mock.calls.map(([input]) => String(input))
+    expect(requested[0]).toBe(
+      `https://openpgpkey.example.net/.well-known/openpgpkey/example.net/hu/${HASH}`,
+    )
+    for (const url of requested) expect(url).not.toContain('keys.openpgp.org')
+  })
+
+  it('falls back from the advanced wkd url to the direct one', async () => {
+    const fetchImpl = vi.fn(async (input: FetchInput) =>
+      String(input).startsWith('https://openpgpkey.')
+        ? new Response('', { status: 404 })
+        : new Response(binaryFixture('claimed'), { status: 200 }),
+    )
+    const result = await resolveEntry(wkdEntry('https://kx.example.org'), { fetch: fetchImpl })
+
+    expect(result.status).toBe('verified')
+    expect(fetchImpl).toHaveBeenCalledTimes(2)
+  })
+
+  it('reports a wkd entry with no key published as not-found, naming the domain', async () => {
+    const result = await resolveEntry(wkdEntry('https://kx.example.org'), {
+      fetch: serving('', 404),
+    })
+
+    expect(result.status).toBe('not-found')
+    expect(result.reason).toBe('no key published at example.net')
+  })
+
+  it('does not fall back to the keyserver when wkd fails', async () => {
+    const fetchImpl = vi.fn(async (_input: FetchInput) => {
+      throw new TypeError('Failed to fetch')
+    })
+    const result = await resolveEntry(wkdEntry('https://kx.example.org'), { fetch: fetchImpl })
+
+    expect(result.status).toBe('fetch-error')
+    expect(fetchImpl.mock.calls.map(([input]) => String(input))).toEqual([
+      `https://openpgpkey.example.net/.well-known/openpgpkey/example.net/hu/${HASH}`,
+      `https://example.net/.well-known/openpgpkey/hu/${HASH}`,
+    ])
+  })
+
+  it('classifies a wkd key claiming a different deployment as a mismatch', async () => {
+    const result = await resolveEntry(wkdEntry('https://other.example.org'), {
+      fetch: vi.fn(async () => new Response(binaryFixture('claimed'), { status: 200 })),
+    })
+
+    expect(result.status).toBe('mismatch')
+    expect(result.claimedInstance).toBe('https://kx.example.org')
   })
 
   it('carries the declared instance through every failure state', async () => {

@@ -11,7 +11,8 @@
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
     "test": "npm run test:unit && npm run test:e2e",
-    "validate:keys": "node scripts/validate-keys.ts"
+    "validate:keys": "node scripts/validate-keys.ts",
+    "wkd-hash": "node scripts/wkd-hash.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",

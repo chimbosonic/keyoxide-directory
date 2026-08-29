@@ -5,7 +5,7 @@ import type { ResolvedInstance, ResolvedStatus } from '../lib/resolve'
 const FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 
 const resolved = (overrides: Partial<ResolvedInstance> = {}): ResolvedInstance => ({
-  entry: { fingerprint: FPR, instance: 'https://kx.example.org' },
+  entry: { type: 'hkp' as const, fingerprint: FPR, instance: 'https://kx.example.org' },
   declaredInstance: 'https://kx.example.org',
   claimedInstance: 'https://kx.example.org',
   fingerprint: FPR,

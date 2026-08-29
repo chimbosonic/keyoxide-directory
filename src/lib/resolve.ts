@@ -1,6 +1,7 @@
 import { fetchKey, type FetchOptions } from './keyserver'
-import { parseKey } from './parseKey'
-import type { KeyEntry } from './validateKeys'
+import { parseKey, type KeyMaterial } from './parseKey'
+import { isHkpEntry, type KeyEntry } from './validateKeys'
+import { fetchWkdKey } from './wkd'
 
 export type ResolvedStatus =
   /** The key carries the notation and it matches what the entry declares. */
@@ -9,11 +10,11 @@ export type ResolvedStatus =
   | 'mismatch'
   /** The key was fetched, but claims no deployment. */
   | 'no-notation'
-  /** The keyserver has no such key. */
+  /** The source has no such key: the keyserver does not hold it, or the domain publishes none. */
   | 'not-found'
   /** The key was fetched but could not be parsed. */
   | 'unreadable'
-  /** The lookup itself failed: network, CORS, or a keyserver error. */
+  /** The lookup itself failed: network, CORS, or a server error. */
   | 'fetch-error'
 
 export interface ResolvedInstance {
@@ -47,6 +48,35 @@ export function sameInstance(a: string, b: string): boolean {
   return normalizeInstanceUrl(a) === normalizeInstanceUrl(b)
 }
 
+type MaterialResult =
+  | { status: 'ok'; key: KeyMaterial }
+  | { status: 'not-found'; reason: string }
+  | { status: 'fetch-error'; reason: string }
+
+/**
+ * Routes an entry to its transport. The two are disjoint by construction: a
+ * fingerprint is what VKS can look up, a domain and hash is what WKD can, and
+ * neither source can serve the other's entries, so there is nothing to fall
+ * back to when one fails.
+ */
+async function fetchMaterial(entry: KeyEntry, options: FetchOptions): Promise<MaterialResult> {
+  if (isHkpEntry(entry)) {
+    const fetched = await fetchKey(entry, options)
+    return fetched.status === 'ok'
+      ? { status: 'ok', key: fetched.armored }
+      : fetched.status === 'not-found'
+        ? { status: 'not-found', reason: 'no such key on the keyserver' }
+        : { status: 'fetch-error', reason: fetched.reason }
+  }
+
+  const fetched = await fetchWkdKey(entry.domain, entry.hash, { fetch: options.fetch })
+  return fetched.status === 'ok'
+    ? { status: 'ok', key: fetched.key }
+    : fetched.status === 'not-found'
+      ? { status: 'not-found', reason: `no key published at ${entry.domain}` }
+      : { status: 'fetch-error', reason: fetched.reason }
+}
+
 /** Fetches, parses, and classifies a single directory entry. */
 export async function resolveEntry(
   entry: KeyEntry,
@@ -59,15 +89,12 @@ export async function resolveEntry(
     fingerprint: null,
   }
 
-  const fetched = await fetchKey(entry, options)
-  if (fetched.status === 'not-found') {
-    return { ...base, status: 'not-found', reason: 'no such key on the keyserver' }
-  }
-  if (fetched.status === 'fetch-error') {
-    return { ...base, status: 'fetch-error', reason: fetched.reason }
+  const fetched = await fetchMaterial(entry, options)
+  if (fetched.status !== 'ok') {
+    return { ...base, status: fetched.status, reason: fetched.reason }
   }
 
-  const parsed = await parseKey(fetched.armored)
+  const parsed = await parseKey(fetched.key)
   if (parsed.status === 'unreadable') {
     return { ...base, status: 'unreadable', reason: parsed.reason }
   }

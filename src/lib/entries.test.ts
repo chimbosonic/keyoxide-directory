@@ -7,7 +7,9 @@ describe('loadEntries', () => {
   })
 
   it('prefers an override when one is present', () => {
-    const entries = [{ fingerprint: '3AA5C34371567BD2', instance: 'https://kx.example.org' }]
+    const entries = [
+      { type: 'hkp', fingerprint: '3AA5C34371567BD2', instance: 'https://kx.example.org' },
+    ]
     expect(loadEntries({ [ENTRIES_OVERRIDE]: entries })).toEqual(entries)
   })
 

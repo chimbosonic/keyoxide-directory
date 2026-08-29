@@ -15,7 +15,9 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "noEmit": true,
+    // Scripts run straight through node, which needs the extension in the specifier.
+    "allowImportingTsExtensions": true,
     "types": ["vitest/globals", "node"]
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "tests/**/*.ts", "*.config.ts"]
+  "include": ["src/**/*.ts", "src/**/*.svelte", "tests/**/*.ts", "scripts/**/*.ts", "*.config.ts"]
 }

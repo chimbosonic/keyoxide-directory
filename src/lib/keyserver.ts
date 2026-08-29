@@ -1,13 +1,17 @@
-import { isFingerprintEntry, type KeyEntry } from './validateKeys'
+import type { HkpEntry } from './validateKeys'
 
 /**
- * keys.openpgp.org is the only source we fetch from. It answers every VKS
- * endpoint with `access-control-allow-origin: *`, which is what makes a
- * backend-free directory possible at all.
+ * Where `hkp` entries are resolved. keys.openpgp.org answers every VKS endpoint
+ * with `access-control-allow-origin: *`, which is what makes a backend-free
+ * directory possible at all.
  *
- * WKD would be the obvious route for email entries, but CORS there is each
- * domain's own server config and most do not send the header, so email is
- * resolved through the same keyserver instead.
+ * The entry type is named `hkp` after Keyoxide's own URL vocabulary, but the
+ * transport below is VKS, keys.openpgp.org's own REST interface, not the HKP
+ * protocol.
+ *
+ * There is no route here for a `wkd` entry, and no fallback from one to the
+ * other: VKS can only look a key up by fingerprint or by a plaintext address,
+ * and a WKD entry stores neither.
  */
 export const KEYSERVER = 'https://keys.openpgp.org'
 
@@ -22,12 +26,8 @@ export interface FetchOptions {
 }
 
 /** Builds the VKS lookup URL for an entry. */
-export function keyUrl(entry: KeyEntry, base: string = KEYSERVER): string {
+export function keyUrl(entry: HkpEntry, base: string = KEYSERVER): string {
   const root = `${base.replace(/\/+$/, '')}/vks/v1`
-
-  if (!isFingerprintEntry(entry)) {
-    return `${root}/by-email/${encodeURIComponent(entry.email)}`
-  }
 
   // VKS splits these: 40 hex characters is a fingerprint, 16 is a long key id.
   const endpoint = entry.fingerprint.length === 40 ? 'by-fingerprint' : 'by-keyid'
@@ -40,7 +40,7 @@ export function keyUrl(entry: KeyEntry, base: string = KEYSERVER): string {
  * or CORS failure, because the two mean different things on the rendered card.
  */
 export async function fetchKey(
-  entry: KeyEntry,
+  entry: HkpEntry,
   options: FetchOptions = {},
 ): Promise<KeyFetchResult> {
   const doFetch = options.fetch ?? globalThis.fetch

@@ -24,11 +24,13 @@
       "format": "uri",
       "pattern": "^https://"
     },
-    "fingerprintEntry": {
+    "hkpEntry": {
       "type": "object",
+      "description": "A key looked up on keys.openpgp.org by fingerprint.",
       "additionalProperties": false,
-      "required": ["fingerprint", "instance"],
+      "required": ["type", "fingerprint", "instance"],
       "properties": {
+        "type": { "const": "hkp" },
         "fingerprint": {
           "type": "string",
           "description": "Long key id (16 hex) or full fingerprint (40 hex). Short key ids are rejected as collision-prone.",
@@ -37,25 +39,29 @@
         "instance": { "$ref": "#/$defs/instance" }
       }
     },
-    "emailEntry": {
+    "wkdEntry": {
       "type": "object",
+      "description": "A key looked up in the domain's Web Key Directory. Carries the hashed local part, never the address itself.",
       "additionalProperties": false,
-      "required": ["email", "instance"],
+      "required": ["type", "domain", "hash", "instance"],
       "properties": {
-        "email": {
+        "type": { "const": "wkd" },
+        "domain": {
           "type": "string",
-          "description": "Address to look the key up by. Note this is published in a public repository and inlined into the shipped bundle.",
-          "format": "email"
+          "description": "The domain half of the operator's address, which WKD needs in the clear to build a URL.",
+          "format": "hostname"
+        },
+        "hash": {
+          "type": "string",
+          "description": "The z-base-32 SHA-1 of the lowercased local part. Compute it with `npm run wkd-hash <address>`.",
+          "pattern": "^[ybndrfg8ejkmcpqxot1uwisza345h769]{32}$"
         },
         "instance": { "$ref": "#/$defs/instance" }
       }
     },
     "entry": {
-      "description": "An entry is identified by a fingerprint or an email, never both.",
-      "oneOf": [
-        { "$ref": "#/$defs/fingerprintEntry" },
-        { "$ref": "#/$defs/emailEntry" }
-      ]
+      "description": "An entry names the lookup it wants: hkp for the keyserver, wkd for a Web Key Directory.",
+      "oneOf": [{ "$ref": "#/$defs/hkpEntry" }, { "$ref": "#/$defs/wkdEntry" }]
     }
   }
 }

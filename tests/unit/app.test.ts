@@ -5,7 +5,7 @@ import type { KeyEntry } from '../../src/lib/validateKeys'
 
 const FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 
-const entry = (instance: string): KeyEntry => ({ fingerprint: FPR, instance })
+const entry = (instance: string): KeyEntry => ({ type: 'hkp', fingerprint: FPR, instance })
 
 const resolved = (
   instance: string,

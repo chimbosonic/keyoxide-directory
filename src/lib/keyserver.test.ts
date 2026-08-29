@@ -1,12 +1,15 @@
 import { KEYSERVER, fetchKey, keyUrl } from './keyserver'
-import type { KeyEntry } from './validateKeys'
+import type { HkpEntry } from './validateKeys'
 
 const LONG_ID = '3AA5C34371567BD2'
 const FULL_FPR = '3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11'
 const INSTANCE = 'https://kx.example.org'
 
-const fprEntry = (fingerprint: string): KeyEntry => ({ fingerprint, instance: INSTANCE })
-const emailEntry = (email: string): KeyEntry => ({ email, instance: INSTANCE })
+const fprEntry = (fingerprint: string): HkpEntry => ({
+  type: 'hkp',
+  fingerprint,
+  instance: INSTANCE,
+})
 
 const respond = (body: string, init: ResponseInit = {}) =>
   vi.fn(async () => new Response(body, { status: 200, ...init }))
@@ -23,18 +26,6 @@ describe('keyUrl', () => {
   it('upper-cases hex so the URL is stable regardless of how it was written', () => {
     expect(keyUrl(fprEntry(LONG_ID.toLowerCase()))).toBe(
       `${KEYSERVER}/vks/v1/by-keyid/${LONG_ID}`,
-    )
-  })
-
-  it('uses by-email for an email entry', () => {
-    expect(keyUrl(emailEntry('alice@example.invalid'))).toBe(
-      `${KEYSERVER}/vks/v1/by-email/alice%40example.invalid`,
-    )
-  })
-
-  it('percent-encodes addresses containing characters that are special in a URL', () => {
-    expect(keyUrl(emailEntry('alice+keyoxide@example.invalid'))).toBe(
-      `${KEYSERVER}/vks/v1/by-email/alice%2Bkeyoxide%40example.invalid`,
     )
   })
 

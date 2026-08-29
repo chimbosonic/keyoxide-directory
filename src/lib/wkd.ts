@@ -52,7 +52,9 @@ export type WkdFetchResult =
   | { status: 'fetch-error'; reason: string }
 
 export interface WkdFetchOptions {
-  fetch?: typeof globalThis.fetch
+  // Explicitly `| undefined`: callers forward an optional fetch straight through,
+  // which exactOptionalPropertyTypes otherwise rejects.
+  fetch?: typeof globalThis.fetch | undefined
 }
 
 /**

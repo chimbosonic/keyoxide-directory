@@ -2,10 +2,31 @@
 import Ajv from 'ajv/dist/2020.js'
 import addFormats from 'ajv-formats'
 
-/** An entry identified by the operator's key, or by an address to look it up by. */
-export type KeyEntry =
-  | { fingerprint: string; instance: string }
-  | { email: string; instance: string }
+/** A key on keys.openpgp.org, named by fingerprint or long key id. */
+export interface HkpEntry {
+  type: 'hkp'
+  fingerprint: string
+  instance: string
+}
+
+/**
+ * A key in a domain's Web Key Directory. The address itself is never stored:
+ * `hash` is the z-base-32 SHA-1 of the local part, which is all a WKD URL needs,
+ * and `domain` has to stay in the clear because the URL is built from it.
+ */
+export interface WkdEntry {
+  type: 'wkd'
+  domain: string
+  hash: string
+  instance: string
+}
+
+/**
+ * Every entry names the lookup it wants rather than leaving it to be inferred
+ * from which fields happen to be present, so the two routes cannot be confused
+ * and the compiler can check that both are handled.
+ */
+export type KeyEntry = HkpEntry | WkdEntry
 
 export interface KeysFile {
   keys: KeyEntry[]
@@ -16,26 +37,31 @@ export interface ValidationResult {
   errors: string[]
 }
 
-export function isFingerprintEntry(
-  entry: KeyEntry,
-): entry is { fingerprint: string; instance: string } {
-  return 'fingerprint' in entry
+export function isHkpEntry(entry: KeyEntry): entry is HkpEntry {
+  return entry.type === 'hkp'
+}
+
+export function isWkdEntry(entry: KeyEntry): entry is WkdEntry {
+  return entry.type === 'wkd'
 }
 
 /**
  * The schema cannot express "these two entries resolve to the same operator", so
- * duplicate detection lives here. Fingerprints are compared case-insensitively
- * because hex casing carries no meaning; instance URLs are compared with their
- * trailing slash normalised away.
+ * duplicate detection lives here. Fingerprints and domains are compared
+ * case-insensitively because their casing carries no meaning; instance URLs are
+ * compared with their trailing slash normalised away.
+ *
+ * A WKD entry's identity is its domain and hash together: the same hash under
+ * two domains is two different addresses.
  */
 export function findDuplicates(keys: KeyEntry[]): string[] {
   const errors: string[] = []
   const seen = new Map<string, number>()
 
   keys.forEach((entry, index) => {
-    const identity = isFingerprintEntry(entry)
+    const identity = isHkpEntry(entry)
       ? `fingerprint:${entry.fingerprint.toLowerCase()}`
-      : `email:${entry.email.toLowerCase()}`
+      : `wkd:${entry.domain.toLowerCase()}/${entry.hash}`
     const previous = seen.get(identity)
     if (previous !== undefined) {
       errors.push(`keys/${index}: duplicate of entry ${previous} (${identity})`)
