@@ -1,0 +1,82 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-r2
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Build and upload to R2
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      # The full suite gates the upload: a failing test must not reach the bucket.
+      - run: npm run validate:keys
+      - run: npm run check
+      - run: npm run test:unit
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+
+      - run: npm run build
+
+      - name: Upload dist/ to R2
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${BUCKET}" ]; then
+            echo "R2_BUCKET repository variable is not set" >&2
+            exit 1
+          fi
+
+          # Asset filenames are content-hashed, so they can be cached forever.
+          # index.html must not be, or a deploy would never become visible.
+          upload() {
+            local file="$1" key="$2" cache="$3" type="$4"
+            echo "  $key"
+            npx wrangler r2 object put "${BUCKET}/${key}" \
+              --file="$file" \
+              --content-type="$type" \
+              --cache-control="$cache" \
+              --remote
+          }
+
+          content_type() {
+            case "$1" in
+              *.html) echo "text/html; charset=utf-8" ;;
+              *.js)   echo "text/javascript; charset=utf-8" ;;
+              *.css)  echo "text/css; charset=utf-8" ;;
+              *.json) echo "application/json" ;;
+              *.svg)  echo "image/svg+xml" ;;
+              *.png)  echo "image/png" ;;
+              *.ico)  echo "image/x-icon" ;;
+              *)      echo "application/octet-stream" ;;
+            esac
+          }
+
+          find dist -type f | while read -r file; do
+            key="${file#dist/}"
+            case "$key" in
+              index.html) cache="no-cache" ;;
+              *)          cache="public, max-age=31536000, immutable" ;;
+            esac
+            upload "$file" "$key" "$cache" "$(content_type "$key")"
+          done
