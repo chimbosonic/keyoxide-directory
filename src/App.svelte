@@ -2,7 +2,8 @@
   import InstanceCard from './components/InstanceCard.svelte'
   import { loadEntries } from './lib/entries'
   import { probeAll, type Liveness } from './lib/probe'
-  import type { ResolvedInstance } from './lib/resolve'
+  import { PROJECT_INSTANCE, projectCard } from './lib/project'
+  import type { DirectoryCard, ResolvedInstance } from './lib/resolve'
   import type { KeyEntry } from './lib/validateKeys'
 
   export type Resolver = (entries: readonly KeyEntry[]) => Promise<ResolvedInstance[]>
@@ -34,8 +35,9 @@
       instances = resolved
 
       // Liveness runs after verification and never blocks it: a deployment being
-      // slow to answer should not hold up rendering what its key says.
-      prober(resolved.map((instance) => instance.declaredInstance)).then((probed) => {
+      // slow to answer should not hold up rendering what its key says. The pinned
+      // instance is probed like any other: it has no key, but it can still be down.
+      prober([PROJECT_INSTANCE, ...resolved.map((instance) => instance.declaredInstance)]).then((probed) => {
         if (!cancelled) liveness = probed
       })
     })
@@ -45,9 +47,13 @@
     }
   })
 
+  // Counted over listed entries only. The pinned instance verifies nothing, so
+  // including it would only make the denominator lie.
   const verified = $derived(
     instances?.filter((instance) => instance.status === 'verified').length ?? 0,
   )
+
+  const cards = $derived<DirectoryCard[]>(instances === null ? [] : [projectCard, ...instances])
 </script>
 
 <div class="wrap">
@@ -71,23 +77,27 @@
 
     {#if instances === null}
       <p class="panel" data-testid="loading">Fetching keys…</p>
-    {:else if instances.length === 0}
-      <p class="panel" data-testid="empty">
-        No instances listed yet. Add yours by opening a pull request against
-        <span class="code inline">src/data/keys.json</span>.
-      </p>
     {:else}
+      <!-- Never empty: the pinned project instance leads the grid. -->
       <div class="grid" data-testid="instances">
-        {#each instances as instance (instance.declaredInstance)}
+        {#each cards as instance (instance.declaredInstance)}
           <InstanceCard {instance} liveness={liveness[instance.declaredInstance] ?? null} />
         {/each}
       </div>
+
+      {#if instances.length === 0}
+        <p class="panel spaced" data-testid="empty">
+          No instances listed yet. Add yours by opening a pull request against
+          <span class="code inline">src/data/keys.json</span>.
+        </p>
+      {/if}
     {/if}
   </section>
 
   <footer>
-    Keys are fetched from <a href="https://keys.openpgp.org">keys.openpgp.org</a> by your
-    browser. Operator addresses are never shown.
+    Keys are fetched by your browser, from
+    <a href="https://keys.openpgp.org">keys.openpgp.org</a> or the operator's own Web Key
+    Directory. Operator addresses are never stored or shown.
   </footer>
 </div>
 
@@ -95,5 +105,9 @@
   .inline {
     display: inline-block;
     padding: 2px 6px;
+  }
+
+  .spaced {
+    margin-top: 16px;
   }
 </style>

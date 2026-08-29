@@ -42,6 +42,9 @@ const ENTRIES = [
  * one answers, one refuses the connection.
  */
 async function stubDeployments(page: Page) {
+  // The pinned project instance is a real deployment, so it is stubbed too and
+  // the suite still reaches nothing outside the browser.
+  await page.route('**/keyoxide.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
   await page.route('**/kx.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
   await page.route('**/plain.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
   await page.route('**/elsewhere.example.org/**', (route) => route.abort('connectionrefused'))
@@ -62,7 +65,19 @@ test.describe('directory', () => {
     await loadDirectory(page)
 
     await expect(page.getByTestId('instances')).toBeVisible()
-    await expect(page.getByRole('article')).toHaveCount(ENTRIES.length)
+    // One per entry, plus the pinned project instance leading the grid.
+    await expect(page.getByRole('article')).toHaveCount(ENTRIES.length + 1)
+    await expect(page.getByRole('article').first()).toContainText('keyoxide.org')
+  })
+
+  test('pins keyoxide.org without counting it as verified', async ({ page }) => {
+    await loadDirectory(page)
+
+    const pinned = page.locator('[data-status="project"]')
+    await expect(pinned).toHaveCount(1)
+    await expect(pinned.getByRole('link')).toHaveAttribute('href', 'https://keyoxide.org')
+    await expect(pinned.getByTestId('verification')).toContainText('project instance')
+    await expect(page.getByTestId('summary')).toHaveText(`1 of ${ENTRIES.length} verified`)
   })
 
   test('verifies a key whose notation matches the declared deployment', async ({ page }) => {
@@ -116,11 +131,16 @@ test.describe('directory', () => {
     expect(body).not.toContain(PLAIN)
   })
 
-  test('shows the empty state when nothing is listed', async ({ page }) => {
+  test('shows the empty state when nothing is listed, alongside the pinned card', async ({
+    page,
+  }) => {
     await loadDirectory(page, [])
 
     await expect(page.getByTestId('empty')).toBeVisible()
-    await expect(page.getByRole('article')).toHaveCount(0)
+    // The directory is never truly empty: the pinned instance always renders.
+    await expect(page.getByRole('article')).toHaveCount(1)
+    await expect(page.locator('[data-status="project"]')).toBeVisible()
+    await expect(page.getByTestId('summary')).toHaveText('0 of 0 verified')
   })
 
   test('marks a deployment that answers as online', async ({ page }) => {

@@ -17,16 +17,30 @@ export type ResolvedStatus =
   /** The lookup itself failed: network, CORS, or a server error. */
   | 'fetch-error'
 
-export interface ResolvedInstance {
-  entry: KeyEntry
-  /** The deployment the directory entry declares. */
+/**
+ * Every resolved entry is a card, but not every card is a resolved entry: the
+ * pinned project instance has no key behind it and so no resolved status.
+ */
+export type CardStatus =
+  | ResolvedStatus
+  /** Pinned by the directory itself rather than claimed by a key. */
+  | 'project'
+
+/** What a card needs to render, which is deliberately less than an entry carries. */
+export interface DirectoryCard {
+  /** The deployment the card is for. */
   declaredInstance: string
   /** The deployment the key itself claims, when it claims one. */
   claimedInstance: string | null
   fingerprint: string | null
-  status: ResolvedStatus
+  status: CardStatus
   /** Human-readable detail, present only for the failure states. */
   reason?: string
+}
+
+export interface ResolvedInstance extends DirectoryCard {
+  entry: KeyEntry
+  status: ResolvedStatus
 }
 
 /**

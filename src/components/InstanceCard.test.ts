@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/svelte'
 import InstanceCard from './InstanceCard.svelte'
-import type { ResolvedInstance, ResolvedStatus } from '../lib/resolve'
+import type { DirectoryCard, ResolvedInstance, ResolvedStatus } from '../lib/resolve'
 
 const FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 
@@ -11,6 +11,47 @@ const resolved = (overrides: Partial<ResolvedInstance> = {}): ResolvedInstance =
   fingerprint: FPR,
   status: 'verified',
   ...overrides,
+})
+
+describe('InstanceCard, pinned project instance', () => {
+  const project: DirectoryCard = {
+    declaredInstance: 'https://keyoxide.org',
+    claimedInstance: null,
+    fingerprint: null,
+    status: 'project',
+    reason: "the Keyoxide project's own deployment",
+  }
+
+  it('links to the instance and labels it as the project instance', () => {
+    render(InstanceCard, { instance: project })
+
+    expect(screen.getByRole('link', { name: 'keyoxide.org' })).toHaveAttribute(
+      'href',
+      'https://keyoxide.org',
+    )
+    expect(screen.getByTestId('verification')).toHaveTextContent('project instance')
+  })
+
+  it('does not claim a key is missing, having never looked for one', () => {
+    render(InstanceCard, { instance: project })
+
+    expect(screen.queryByTestId('key-id')).toBeNull()
+    expect(document.body.textContent).not.toContain('key not retrieved')
+  })
+
+  it('marks itself neither verified nor failing', () => {
+    const { container } = render(InstanceCard, { instance: project })
+
+    const dot = container.querySelector('[data-testid="verification"] .dot')
+    expect(dot).not.toHaveClass('ok')
+    expect(dot).not.toHaveClass('warn')
+  })
+
+  it('still shows liveness, because a pinned deployment can be down', () => {
+    render(InstanceCard, { instance: project, liveness: 'unreachable' })
+
+    expect(screen.getByTestId('liveness')).toHaveTextContent('unreachable')
+  })
 })
 
 describe('InstanceCard', () => {

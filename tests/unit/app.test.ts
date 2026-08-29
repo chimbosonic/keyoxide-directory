@@ -1,5 +1,6 @@
 import { render, screen, waitFor } from '@testing-library/svelte'
 import App from '../../src/App.svelte'
+import { PROJECT_INSTANCE } from '../../src/lib/project'
 import type { ResolvedInstance } from '../../src/lib/resolve'
 import type { KeyEntry } from '../../src/lib/validateKeys'
 
@@ -27,14 +28,15 @@ describe('App', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows the empty state when nothing is listed', async () => {
+  it('shows the empty state when nothing is listed, alongside the pinned card', async () => {
     render(App, { entries: [], resolver: async () => [] })
 
     await waitFor(() => expect(screen.getByTestId('empty')).toBeInTheDocument())
-    expect(screen.queryByTestId('instances')).toBeNull()
+    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(screen.getByRole('link', { name: 'keyoxide.org' })).toBeInTheDocument()
   })
 
-  it('renders a card per resolved entry', async () => {
+  it('renders a card per resolved entry, after the pinned one', async () => {
     const entries = [entry('https://one.example.org'), entry('https://two.example.org')]
     const resolver = async () => [
       resolved('https://one.example.org'),
@@ -44,7 +46,20 @@ describe('App', () => {
     render(App, { entries, resolver })
 
     await waitFor(() => expect(screen.getByTestId('instances')).toBeInTheDocument())
-    expect(screen.getAllByRole('article')).toHaveLength(2)
+
+    const cards = screen.getAllByRole('article')
+    expect(cards).toHaveLength(3)
+    expect(cards[0]).toHaveTextContent('keyoxide.org')
+    expect(cards[0]).toHaveTextContent('project instance')
+    expect(screen.queryByTestId('empty')).toBeNull()
+  })
+
+  it('pins keyoxide.org without counting it as verified', async () => {
+    const resolver = async () => [resolved('https://one.example.org')]
+
+    render(App, { entries: [], resolver })
+
+    await waitFor(() => expect(screen.getByTestId('summary')).toHaveTextContent('1 of 1 verified'))
   })
 
   it('summarises how many entries verified', async () => {
@@ -68,13 +83,15 @@ describe('App', () => {
     await waitFor(() => expect(resolver).toHaveBeenCalledWith(entries))
   })
 
-  it('probes the deployments it resolved', async () => {
+  it('probes the deployments it resolved, and the pinned one', async () => {
     const resolver = async () => [resolved('https://one.example.org')]
     const prober = vi.fn(async () => ({}))
 
     render(App, { entries: [], resolver, prober })
 
-    await waitFor(() => expect(prober).toHaveBeenCalledWith(['https://one.example.org']))
+    await waitFor(() =>
+      expect(prober).toHaveBeenCalledWith([PROJECT_INSTANCE, 'https://one.example.org']),
+    )
   })
 
   it('renders liveness once the probe answers', async () => {
@@ -92,7 +109,7 @@ describe('App', () => {
 
     render(App, { entries: [], resolver, prober })
 
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1))
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2))
     expect(screen.queryByTestId('liveness')).toBeNull()
   })
 })

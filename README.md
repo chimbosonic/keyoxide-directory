@@ -24,10 +24,18 @@ passing silently.
 
 ## What a card shows
 
-Two independent pills:
+keyoxide.org leads the grid as a pinned card. It cannot arrive the ordinary way
+— a card is earned by carrying an `instance@dp42.dev` notation, and the Keyoxide
+project has no reason to sign a notation namespaced under this directory's
+domain — so rather than leave the best-known deployment out of a directory of
+deployments, it is pinned. It is probed for liveness like any other, and kept
+out of the verified count, because nothing about it was verified.
+
+Every other card shows two independent pills:
 
 | | |
 |---|---|
+| **project instance** | pinned by the directory; no key, and nothing claimed |
 | **verified** | the key's notation matches the declared deployment |
 | **claims another deployment** | the key carries a notation, for somewhere else |
 | **no claim on key** | the key was fetched but carries no notation |

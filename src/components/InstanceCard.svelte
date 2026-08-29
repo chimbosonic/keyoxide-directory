@@ -1,14 +1,15 @@
 <script lang="ts">
   import { instanceHost, shortKeyId } from '../lib/format'
   import type { Liveness } from '../lib/probe'
-  import type { ResolvedInstance } from '../lib/resolve'
+  import type { CardStatus, DirectoryCard } from '../lib/resolve'
 
   const {
     instance,
     liveness = null,
-  }: { instance: ResolvedInstance; liveness?: Liveness | null } = $props()
+  }: { instance: DirectoryCard; liveness?: Liveness | null } = $props()
 
-  const LABELS: Record<ResolvedInstance['status'], string> = {
+  const LABELS: Record<CardStatus, string> = {
+    project: 'project instance',
     verified: 'verified',
     mismatch: 'claims another deployment',
     'no-notation': 'no claim on key',
@@ -26,6 +27,9 @@
   const keyId = $derived(shortKeyId(instance.fingerprint))
   const label = $derived(LABELS[instance.status])
   const ok = $derived(instance.status === 'verified')
+  // The pinned card is neither verified nor failing: it makes no claim to check,
+  // so its dot stays neutral rather than warning about a key that never existed.
+  const warn = $derived(instance.status !== 'verified' && instance.status !== 'project')
 </script>
 
 <article class="panel" data-status={instance.status}>
@@ -36,7 +40,7 @@
   </h3>
 
   <p class="pill" data-testid="verification">
-    <span class="dot" class:ok class:warn={!ok}></span>
+    <span class="dot" class:ok class:warn></span>
     {label}
   </p>
 
@@ -53,7 +57,7 @@
 
   {#if keyId}
     <p class="code" data-testid="key-id">{keyId}</p>
-  {:else}
+  {:else if instance.status !== 'project'}
     <p class="muted">key not retrieved</p>
   {/if}
 
