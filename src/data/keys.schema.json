@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chimbosonic/keyoxide-directory/keys.schema.json",
+  "title": "Keyoxide instance directory",
+  "description": "The list of Keyoxide deployments and the operator keys that claim them.",
+  "type": "object",
+  "required": ["keys"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Editor hint; points at this file."
+    },
+    "keys": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "instance": {
+      "type": "string",
+      "description": "The Keyoxide deployment this operator claims. Must match the notation on their key.",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "fingerprintEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["fingerprint", "instance"],
+      "properties": {
+        "fingerprint": {
+          "type": "string",
+          "description": "Long key id (16 hex) or full fingerprint (40 hex). Short key ids are rejected as collision-prone.",
+          "pattern": "^([0-9A-Fa-f]{16}|[0-9A-Fa-f]{40})$"
+        },
+        "instance": { "$ref": "#/$defs/instance" }
+      }
+    },
+    "emailEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["email", "instance"],
+      "properties": {
+        "email": {
+          "type": "string",
+          "description": "Address to look the key up by. Note this is published in a public repository and inlined into the shipped bundle.",
+          "format": "email"
+        },
+        "instance": { "$ref": "#/$defs/instance" }
+      }
+    },
+    "entry": {
+      "description": "An entry is identified by a fingerprint or an email, never both.",
+      "oneOf": [
+        { "$ref": "#/$defs/fingerprintEntry" },
+        { "$ref": "#/$defs/emailEntry" }
+      ]
+    }
+  }
+}

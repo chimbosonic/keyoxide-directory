@@ -10,7 +10,8 @@
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test:unit": "vitest run",
     "test:e2e": "playwright test",
-    "test": "npm run test:unit && npm run test:e2e"
+    "test": "npm run test:unit && npm run test:e2e",
+    "validate:keys": "node scripts/validate-keys.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
@@ -18,6 +19,8 @@
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/svelte": "^5.4.2",
     "@types/node": "^26.4.0",
+    "ajv": "^8.20.0",
+    "ajv-formats": "^3.0.1",
     "jsdom": "^30.0.1",
     "svelte": "^5.57.0",
     "svelte-check": "^4.7.6",
