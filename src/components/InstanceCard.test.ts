@@ -87,4 +87,39 @@ describe('InstanceCard', () => {
 
     expect(screen.getByText('Failed to fetch')).toBeInTheDocument()
   })
+
+  it('shows no liveness pill until a probe has answered', () => {
+    render(InstanceCard, { instance: resolved() })
+    expect(screen.queryByTestId('liveness')).toBeNull()
+  })
+
+  it('shows an online deployment with the ok dot', () => {
+    const { container } = render(InstanceCard, { instance: resolved(), liveness: 'online' })
+
+    const pill = screen.getByTestId('liveness')
+    expect(pill).toHaveTextContent('online')
+    expect(container.querySelector('[data-testid="liveness"] .dot.ok')).not.toBeNull()
+  })
+
+  it('shows an unreachable deployment with the warn dot', () => {
+    const { container } = render(InstanceCard, { instance: resolved(), liveness: 'unreachable' })
+
+    expect(screen.getByTestId('liveness')).toHaveTextContent('unreachable')
+    expect(container.querySelector('[data-testid="liveness"] .dot.warn')).not.toBeNull()
+  })
+
+  it('shows an unknown probe as neither ok nor warn, so a CORS-restricted deployment is not called down', () => {
+    const { container } = render(InstanceCard, { instance: resolved(), liveness: 'unknown' })
+
+    expect(screen.getByTestId('liveness')).toHaveTextContent('no answer yet')
+    expect(container.querySelector('[data-testid="liveness"] .dot.ok')).toBeNull()
+    expect(container.querySelector('[data-testid="liveness"] .dot.warn')).toBeNull()
+  })
+
+  it('keeps verification and liveness as separate pills', () => {
+    render(InstanceCard, { instance: resolved({ status: 'no-notation' }), liveness: 'online' })
+
+    expect(screen.getByTestId('verification')).toHaveTextContent('no claim on key')
+    expect(screen.getByTestId('liveness')).toHaveTextContent('online')
+  })
 })

@@ -67,4 +67,32 @@ describe('App', () => {
 
     await waitFor(() => expect(resolver).toHaveBeenCalledWith(entries))
   })
+
+  it('probes the deployments it resolved', async () => {
+    const resolver = async () => [resolved('https://one.example.org')]
+    const prober = vi.fn(async () => ({}))
+
+    render(App, { entries: [], resolver, prober })
+
+    await waitFor(() => expect(prober).toHaveBeenCalledWith(['https://one.example.org']))
+  })
+
+  it('renders liveness once the probe answers', async () => {
+    const resolver = async () => [resolved('https://one.example.org')]
+    const prober = async () => ({ 'https://one.example.org': 'online' as const })
+
+    render(App, { entries: [], resolver, prober })
+
+    await waitFor(() => expect(screen.getByTestId('liveness')).toHaveTextContent('online'))
+  })
+
+  it('renders cards before the probe answers', async () => {
+    const resolver = async () => [resolved('https://one.example.org')]
+    const prober = () => new Promise<Record<string, never>>(() => {})
+
+    render(App, { entries: [], resolver, prober })
+
+    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(1))
+    expect(screen.queryByTestId('liveness')).toBeNull()
+  })
 })

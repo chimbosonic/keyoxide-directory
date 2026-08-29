@@ -1,10 +1,12 @@
 <script lang="ts">
   import InstanceCard from './components/InstanceCard.svelte'
   import { loadEntries } from './lib/entries'
+  import { probeAll, type Liveness } from './lib/probe'
   import type { ResolvedInstance } from './lib/resolve'
   import type { KeyEntry } from './lib/validateKeys'
 
   export type Resolver = (entries: readonly KeyEntry[]) => Promise<ResolvedInstance[]>
+  export type Prober = (urls: readonly string[]) => Promise<Record<string, Liveness>>
 
   /**
    * OpenPGP.js is ~385 kB and is only needed once entries are being checked, so
@@ -18,15 +20,26 @@
   const {
     entries = loadEntries(),
     resolver = defaultResolver,
-  }: { entries?: KeyEntry[]; resolver?: Resolver } = $props()
+    prober = (urls: readonly string[]) => probeAll(urls),
+  }: { entries?: KeyEntry[]; resolver?: Resolver; prober?: Prober } = $props()
 
   let instances = $state<ResolvedInstance[] | null>(null)
+  let liveness = $state<Record<string, Liveness>>({})
 
   $effect(() => {
     let cancelled = false
+
     resolver(entries).then((resolved) => {
-      if (!cancelled) instances = resolved
+      if (cancelled) return
+      instances = resolved
+
+      // Liveness runs after verification and never blocks it: a deployment being
+      // slow to answer should not hold up rendering what its key says.
+      prober(resolved.map((instance) => instance.declaredInstance)).then((probed) => {
+        if (!cancelled) liveness = probed
+      })
     })
+
     return () => {
       cancelled = true
     }
@@ -66,7 +79,7 @@
     {:else}
       <div class="grid" data-testid="instances">
         {#each instances as instance (instance.declaredInstance)}
-          <InstanceCard {instance} />
+          <InstanceCard {instance} liveness={liveness[instance.declaredInstance] ?? null} />
         {/each}
       </div>
     {/if}

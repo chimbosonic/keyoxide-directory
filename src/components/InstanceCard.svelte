@@ -1,8 +1,12 @@
 <script lang="ts">
   import { instanceHost, shortKeyId } from '../lib/format'
+  import type { Liveness } from '../lib/probe'
   import type { ResolvedInstance } from '../lib/resolve'
 
-  const { instance }: { instance: ResolvedInstance } = $props()
+  const {
+    instance,
+    liveness = null,
+  }: { instance: ResolvedInstance; liveness?: Liveness | null } = $props()
 
   const LABELS: Record<ResolvedInstance['status'], string> = {
     verified: 'verified',
@@ -11,6 +15,12 @@
     'not-found': 'key not found',
     unreadable: 'key unreadable',
     'fetch-error': 'lookup failed',
+  }
+
+  const LIVENESS_LABELS: Record<Liveness, string> = {
+    online: 'online',
+    unreachable: 'unreachable',
+    unknown: 'no answer yet',
   }
 
   const keyId = $derived(shortKeyId(instance.fingerprint))
@@ -29,6 +39,17 @@
     <span class="dot" class:ok class:warn={!ok}></span>
     {label}
   </p>
+
+  {#if liveness}
+    <p class="pill" data-testid="liveness" data-liveness={liveness}>
+      <span
+        class="dot"
+        class:ok={liveness === 'online'}
+        class:warn={liveness === 'unreachable'}
+      ></span>
+      {LIVENESS_LABELS[liveness]}
+    </p>
+  {/if}
 
   {#if keyId}
     <p class="code" data-testid="key-id">{keyId}</p>

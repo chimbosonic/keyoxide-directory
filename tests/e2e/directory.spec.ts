@@ -37,8 +37,20 @@ const ENTRIES = [
   { fingerprint: MISSING, instance: 'https://gone.example.org' },
 ]
 
+/**
+ * Deployments are stubbed too, so the suite never touches the real network:
+ * one answers, one refuses the connection.
+ */
+async function stubDeployments(page: Page) {
+  await page.route('**/kx.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await page.route('**/plain.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await page.route('**/elsewhere.example.org/**', (route) => route.abort('connectionrefused'))
+  await page.route('**/gone.example.org/**', (route) => route.abort('connectionrefused'))
+}
+
 async function loadDirectory(page: Page, entries: unknown[] = ENTRIES) {
   await stubKeyserver(page)
+  await stubDeployments(page)
   await page.addInitScript((seed) => {
     ;(window as unknown as Record<string, unknown>)['__KEYOXIDE_DIRECTORY_ENTRIES__'] = seed
   }, entries)
@@ -109,5 +121,28 @@ test.describe('directory', () => {
 
     await expect(page.getByTestId('empty')).toBeVisible()
     await expect(page.getByRole('article')).toHaveCount(0)
+  })
+
+  test('marks a deployment that answers as online', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="verified"]')
+    await expect(card.getByTestId('liveness')).toHaveText('online')
+  })
+
+  test('marks a deployment that refuses the connection as unreachable', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="mismatch"]')
+    await expect(card.getByTestId('liveness')).toHaveText('unreachable')
+  })
+
+  test('probes independently of verification', async ({ page }) => {
+    await loadDirectory(page)
+
+    // The key claims nothing, but the deployment itself is up.
+    const card = page.locator('[data-status="no-notation"]')
+    await expect(card.getByTestId('verification')).toContainText('no claim on key')
+    await expect(card.getByTestId('liveness')).toHaveText('online')
   })
 })
