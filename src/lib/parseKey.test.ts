@@ -11,6 +11,10 @@ import { parseKey, selectNewestSelfCertification } from './parseKey'
 const fixture = (name: string) =>
   readFileSync(resolve(__dirname, '../../tests/fixtures/keys', `${name}.asc`), 'utf8')
 
+/** The same key with its armor stripped, as `gpg --dearmor` emits it and as WKD serves it. */
+const binaryFixture = (name: string) =>
+  new Uint8Array(readFileSync(resolve(__dirname, '../../tests/fixtures/keys', `${name}.gpg`)))
+
 const CLAIMED_FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 const PLAIN_FPR = 'E9B57E7488818FE8A72CB8A20A6899A0D2FBBD4E'
 const MULTI_FPR = '3A632274B46DD8E417096D31ABB959C77FE2ADF4'
@@ -51,6 +55,21 @@ describe('parseKey', () => {
     expect(Object.keys(result.key).sort()).toEqual(['fingerprint', 'instanceUrl'])
     expect(JSON.stringify(result.key)).not.toContain('example.invalid')
     expect(JSON.stringify(result.key)).not.toContain('Fixture')
+  })
+
+  it('reads a binary key, as WKD serves it, to the same result as its armored form', async () => {
+    const result = await parseKey(binaryFixture('claimed'))
+
+    expect(result).toEqual({
+      status: 'ok',
+      key: { fingerprint: CLAIMED_FPR, instanceUrl: 'https://kx.example.org' },
+    })
+    expect(result).toEqual(await parseKey(fixture('claimed')))
+  })
+
+  it('reports binary that is not a key as unreadable', async () => {
+    const result = await parseKey(new Uint8Array([0, 1, 2, 3]))
+    expect(result.status).toBe('unreadable')
   })
 
   it('reports an unreadable key rather than throwing', async () => {

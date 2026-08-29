@@ -48,12 +48,24 @@ function findInstanceUrl(users: readonly { selfCertifications: SelfCertification
 }
 
 /**
- * Parses an armored public key. Returns `unreadable` rather than throwing,
- * because a malformed key is a rendering state, not a crash.
+ * The two transports hand us different things: the keyserver returns an armored
+ * block, while WKD serves raw packets with no armor at all. Rather than armor
+ * the bytes back up just to parse them, the caller passes whichever it has.
  */
-export async function parseKey(armored: string): Promise<ParseResult> {
+export type KeyMaterial = string | Uint8Array
+
+/**
+ * Parses a public key, armored or binary. Returns `unreadable` rather than
+ * throwing, because a malformed key is a rendering state, not a crash.
+ */
+export async function parseKey(material: KeyMaterial): Promise<ParseResult> {
   try {
-    const key = await readKey({ armoredKey: armored })
+    // Branched rather than passed a union: readKey is overloaded, and an
+    // `armoredKey | binaryKey` union satisfies neither overload.
+    const key =
+      typeof material === 'string'
+        ? await readKey({ armoredKey: material })
+        : await readKey({ binaryKey: material })
     return {
       status: 'ok',
       key: {
