@@ -3,6 +3,12 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 export default defineConfig({
   plugins: [svelte()],
+  resolve: {
+    // The lightweight build drops the curves we never touch; we only parse keys.
+    // It is browser-only, so it is left out under Vitest, where library tests run
+    // in node against the node build instead.
+    alias: process.env.VITEST ? {} : { openpgp: 'openpgp/lightweight' },
+  },
   // Relative base so the built bundle works from any R2 prefix.
   base: './',
   build: {
