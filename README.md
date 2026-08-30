@@ -17,10 +17,29 @@ rather than deployment URLs. That is deliberate on Keyoxide's part: every
 deployment renders any key, so a key is not bound to one.
 
 This directory therefore defines its own notation, `instance@dp42.dev`,
-namespaced under a controlled domain as RFC 9580 requires. An entry verifies when
-the URL in that notation matches the URL declared in `keys.json`. Both halves are
-required, so a typo or a claim on someone else's deployment shows up rather than
-passing silently.
+namespaced under a controlled domain as RFC 9580 requires.
+
+That notation alone proves less than it appears to. It is the operator saying "I
+run this deployment", and the entry in `keys.json` says the same thing — both
+written by whoever holds the key. On its own it is one party talking to itself,
+and anyone could sign a notation naming a deployment they have nothing to do
+with. So the deployment has to answer back:
+
+```
+key  ──  instance@dp42.dev notation  ──▶  deployment
+key  ◀──  _keyoxide-directory TXT     ──  deployment
+```
+
+An entry verifies only when both directions agree: the key names the deployment,
+and a TXT record in that host's zone names the key. Publishing the record needs
+control of the hostname's DNS, which is what the operator has and an impersonator
+does not.
+
+The record proves control of the *hostname*, not of a path — an instance at
+`https://example.org/keyoxide` is confirmed by a record on `example.org`. And the
+trust is not cryptographic: the record is read over DNS-over-HTTPS, so we believe
+what the resolver tells us. Its DNSSEC `AD` flag is the resolver's own claim
+rather than something checked here.
 
 ## What a card shows
 
@@ -36,7 +55,10 @@ Every other card shows two independent pills:
 | | |
 |---|---|
 | **project instance** | pinned by the directory; no key, and nothing claimed |
-| **verified** | the key's notation matches the declared deployment |
+| **verified** | the key names the deployment, and the deployment names the key |
+| **deployment does not confirm** | the key's claim matches, but the host publishes no record |
+| **deployment names another key** | the host publishes a record, for somebody else |
+| **confirmation lookup failed** | no resolver could be reached, so ownership is unknown |
 | **claims another deployment** | the key carries a notation, for somewhere else |
 | **no claim on key** | the key was fetched but carries no notation |
 | **key not found** | the source has no such key: the keyserver does not hold it, or the domain publishes none |
@@ -51,6 +73,20 @@ Liveness uses a `no-cors` request, which resolves whenever something answers and
 rejects only on a connection failure. A timeout is reported as *no answer yet*
 rather than unreachable — a healthy deployment that simply does not allow this
 origin must not be labelled down.
+
+## Publishing the ownership record
+
+At the instance's hostname, prefixed with an underscore label so it cannot
+collide with a host of the same name:
+
+```
+_keyoxide-directory.kx.example.org.  IN  TXT  "openpgp4fpr:3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11"
+```
+
+The `openpgp4fpr:` syntax is Keyoxide's own. Several records are allowed and any
+one of them matching confirms the key, so rotating a key or running a deployment
+with someone else needs no flag day. A TXT record under this name that is not a
+fingerprint URI is ignored rather than read as a competing claim.
 
 ## Where keys are fetched from
 
@@ -86,6 +122,12 @@ No address is stored either. A `wkd` entry carries the z-base-32 SHA-1 of the
 local part, which is all a WKD URL is built from, so nothing in this repository
 or the shipped bundle is an address. `npm run wkd-hash <address>` computes it
 locally and sends nothing anywhere.
+
+Checking ownership means the page also asks a DNS-over-HTTPS resolver about each
+listed instance, which is a third party it did not previously contact. What that
+resolver learns is the hostnames of entries already published in this repository,
+not anything about the visitor beyond their having opened the directory. It is
+still a party in the loop, and worth knowing about.
 
 Be clear-eyed about what that hash buys, though: it is an unsalted SHA-1 of a
 lowercased local part, sitting next to the domain in the clear. It stops a

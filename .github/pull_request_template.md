@@ -20,7 +20,34 @@ Use the deployment's base URL, exactly as you will write it in the entry. The
 comparison ignores a trailing slash and the case of the host, but the path is
 compared as written.
 
-## 2. Publish your key, and pick the lookup that matches
+## 2. Confirm the claim from the deployment
+
+Step 1 is you saying you run the deployment. On its own that proves nothing —
+anyone can sign a notation naming somebody else's deployment. So the deployment
+has to name you back, with a TXT record in its own zone:
+
+```
+_keyoxide-directory.kx.example.org.  IN  TXT  "openpgp4fpr:<YOUR-FINGERPRINT>"
+```
+
+The name is `_keyoxide-directory.` followed by your instance's hostname, and the
+value is your full 40-character fingerprint after `openpgp4fpr:`. Publishing it
+needs control of that hostname's DNS, which is the thing an impersonator does not
+have.
+
+Check it before opening the pull request:
+
+```console
+$ dig +short TXT _keyoxide-directory.kx.example.org
+"openpgp4fpr:3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11"
+```
+
+Several records are fine — any one matching confirms you, so rotating a key or
+sharing a deployment does not need a flag day. Note the record covers the
+hostname, so an instance at `https://example.org/keyoxide` is confirmed by a
+record on `example.org`.
+
+## 3. Publish your key, and pick the lookup that matches
 
 Every entry names the lookup the directory should use. Choose the one that
 matches where your key lives.
@@ -82,7 +109,7 @@ lowercased local part next to your domain in the clear, so it defeats address
 scrapers, not a determined person with a wordlist. Use `hkp` with a fingerprint
 if you want nothing derived from your address in the file at all.
 
-## 3. Check it locally
+## 4. Check it locally
 
 ```console
 $ npm ci
@@ -94,11 +121,12 @@ $ npm run test:unit
 
 - [ ] My key carries the `instance@dp42.dev` notation, and its value matches the
       `instance` in my entry.
+- [ ] My deployment's hostname publishes a `_keyoxide-directory` TXT record
+      naming my fingerprint, and `dig` shows it.
 - [ ] My key can be fetched: published to keys.openpgp.org for an `hkp` entry,
       or served over WKD with CORS headers for a `wkd` entry.
 - [ ] I added exactly one entry, and its `type` matches how my key is published.
 - [ ] `npm run validate:keys` passes.
-- [ ] I operate this deployment.
 
 ## What the site will show
 
@@ -106,6 +134,7 @@ Your card shows the deployment host, a short key id (the last 16 hex characters
 of your fingerprint) and two pills: whether the claim verified, and whether the
 deployment answered. Your user id and address are never rendered.
 
-If something is wrong the entry still appears, marked with the reason — a key
-that claims a different deployment, a key carrying no notation, or a key that
-could not be found where the entry said it would be.
+If something is wrong the entry still appears, marked with what was wrong — a key
+that claims a different deployment, a key carrying no notation, a key that could
+not be found where the entry said it would be, or a deployment that does not name
+your key back.
