@@ -1,5 +1,5 @@
 import { readKey } from 'openpgp'
-import { NOTATION_NAME } from './notation'
+import { NOTATION_NAME, PROOF_NOTATION_NAMES, parseDnsClaim } from './notation'
 
 /**
  * What the directory needs from a key, and nothing more. User ids are
@@ -11,15 +11,24 @@ export interface ParsedKey {
   fingerprint: string
   /** The deployment claimed by the notation, or null when the key carries none. */
   instanceUrl: string | null
+  /** Every domain the key's proof notations claim, deduped and sorted. */
+  provenDomains: string[]
 }
 
 export type ParseResult =
   | { status: 'ok'; key: ParsedKey }
   | { status: 'unreadable'; reason: string }
 
+/** The shape openpgp.js gives a notation subpacket, narrowed to what is read here. */
+interface RawNotation {
+  name: string
+  value: Uint8Array
+}
+
 interface SelfCertification {
   created: Date
   notations: Record<string, string>
+  rawNotations: RawNotation[]
 }
 
 /**
@@ -35,6 +44,35 @@ export function selectNewestSelfCertification<T extends { created: Date }>(
       newest === undefined || candidate.created > newest.created ? candidate : newest,
     undefined,
   )
+}
+
+/**
+ * Every domain the key proves, scanning every user id.
+ *
+ * Read off `rawNotations` rather than the `notations` map, because that map is
+ * keyed by name and so keeps only the last notation parsed under each. A key
+ * with two `proof@ariadne.id` proofs — the ordinary case, one per identity —
+ * would otherwise show up carrying one, chosen by subpacket order. The map also
+ * drops notations not flagged human-readable, which `rawNotations` keeps.
+ */
+function findProvenDomains(
+  users: readonly { selfCertifications: SelfCertification[] }[],
+): string[] {
+  const decoder = new TextDecoder()
+  const domains = new Set<string>()
+
+  for (const user of users) {
+    const newest = selectNewestSelfCertification(user.selfCertifications ?? [])
+    for (const notation of newest?.rawNotations ?? []) {
+      if (!PROOF_NOTATION_NAMES.includes(notation.name)) continue
+
+      const domain = parseDnsClaim(decoder.decode(notation.value))
+      if (domain !== null) domains.add(domain)
+    }
+  }
+
+  // Sorted so a key's proofs read the same way whatever order gpg wrote them in.
+  return [...domains].sort()
 }
 
 /** Reads the instance notation off a key, scanning every user id. */
@@ -66,13 +104,13 @@ export async function parseKey(material: KeyMaterial): Promise<ParseResult> {
       typeof material === 'string'
         ? await readKey({ armoredKey: material })
         : await readKey({ binaryKey: material })
+    const users = key.users as unknown as { selfCertifications: SelfCertification[] }[]
     return {
       status: 'ok',
       key: {
         fingerprint: key.getFingerprint().toUpperCase(),
-        instanceUrl: findInstanceUrl(
-          key.users as unknown as { selfCertifications: SelfCertification[] }[],
-        ),
+        instanceUrl: findInstanceUrl(users),
+        provenDomains: findProvenDomains(users),
       },
     }
   } catch (error) {

@@ -18,6 +18,8 @@ const binaryFixture = (name: string) =>
 const CLAIMED_FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 const PLAIN_FPR = 'E9B57E7488818FE8A72CB8A20A6899A0D2FBBD4E'
 const MULTI_FPR = '3A632274B46DD8E417096D31ABB959C77FE2ADF4'
+const PROOF_FPR = '125201CAF360D90D52549F62A0A332F5361EB31F'
+const PROOFS_FPR = '8CBEBAE9A6AE897FA9BBEAFAA8BFC39B83621CE0'
 
 describe('parseKey', () => {
   it('reads the instance notation off a claiming key', async () => {
@@ -25,7 +27,7 @@ describe('parseKey', () => {
 
     expect(result).toEqual({
       status: 'ok',
-      key: { fingerprint: CLAIMED_FPR, instanceUrl: 'https://kx.example.org' },
+      key: { fingerprint: CLAIMED_FPR, instanceUrl: 'https://kx.example.org', provenDomains: [] },
     })
   })
 
@@ -34,7 +36,7 @@ describe('parseKey', () => {
 
     expect(result).toEqual({
       status: 'ok',
-      key: { fingerprint: PLAIN_FPR, instanceUrl: null },
+      key: { fingerprint: PLAIN_FPR, instanceUrl: null, provenDomains: [] },
     })
   })
 
@@ -43,7 +45,35 @@ describe('parseKey', () => {
 
     expect(result).toEqual({
       status: 'ok',
-      key: { fingerprint: MULTI_FPR, instanceUrl: 'https://kx.multi.example.org' },
+      key: { fingerprint: MULTI_FPR, instanceUrl: 'https://kx.multi.example.org', provenDomains: [] },
+    })
+  })
+
+  it('reads the domain a key proves over dns', async () => {
+    const result = await parseKey(fixture('proof'))
+
+    expect(result).toEqual({
+      status: 'ok',
+      key: { fingerprint: PROOF_FPR, instanceUrl: null, provenDomains: ['kx.example.org'] },
+    })
+  })
+
+  /**
+   * The one that catches openpgp.js's `notations` map: it is keyed by notation
+   * name, so of this key's two `proof@ariadne.id` dns proofs it would keep
+   * whichever was parsed last. Both have to survive, the legacy notation name
+   * has to be read, and the Mastodon proof has to be ignored rather than fail.
+   */
+  it('reads every proof a key carries, including several under one name', async () => {
+    const result = await parseKey(fixture('proofs'))
+
+    expect(result).toEqual({
+      status: 'ok',
+      key: {
+        fingerprint: PROOFS_FPR,
+        instanceUrl: null,
+        provenDomains: ['legacy.example.org', 'multi.example.org', 'second.example.org'],
+      },
     })
   })
 
@@ -52,19 +82,19 @@ describe('parseKey', () => {
     expect(result.status).toBe('ok')
 
     if (result.status !== 'ok') return
-    expect(Object.keys(result.key).sort()).toEqual(['fingerprint', 'instanceUrl'])
+    expect(Object.keys(result.key).sort()).toEqual(['fingerprint', 'instanceUrl', 'provenDomains'])
     expect(JSON.stringify(result.key)).not.toContain('example.invalid')
     expect(JSON.stringify(result.key)).not.toContain('Fixture')
   })
 
   it('reads a binary key, as WKD serves it, to the same result as its armored form', async () => {
-    const result = await parseKey(binaryFixture('claimed'))
+    const result = await parseKey(binaryFixture('proof'))
 
     expect(result).toEqual({
       status: 'ok',
-      key: { fingerprint: CLAIMED_FPR, instanceUrl: 'https://kx.example.org' },
+      key: { fingerprint: PROOF_FPR, instanceUrl: null, provenDomains: ['kx.example.org'] },
     })
-    expect(result).toEqual(await parseKey(fixture('claimed')))
+    expect(result).toEqual(await parseKey(fixture('proof')))
   })
 
   it('reports binary that is not a key as unreadable', async () => {
