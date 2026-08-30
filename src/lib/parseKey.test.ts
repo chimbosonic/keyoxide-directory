@@ -1,6 +1,5 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { NOTATION_NAME } from './notation'
 import { parseKey, selectNewestSelfCertification } from './parseKey'
 
 /**
@@ -17,36 +16,20 @@ const binaryFixture = (name: string) =>
 
 const CLAIMED_FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 const PLAIN_FPR = 'E9B57E7488818FE8A72CB8A20A6899A0D2FBBD4E'
-const MULTI_FPR = '3A632274B46DD8E417096D31ABB959C77FE2ADF4'
 const PROOF_FPR = '125201CAF360D90D52549F62A0A332F5361EB31F'
-const PROOFS_FPR = '8CBEBAE9A6AE897FA9BBEAFAA8BFC39B83621CE0'
+const PROOFS_FPR = '7853FDF799B81400814C279B187149C137000B9D'
 
 describe('parseKey', () => {
-  it('reads the instance notation off a claiming key', async () => {
-    const result = await parseKey(fixture('claimed'))
-
-    expect(result).toEqual({
-      status: 'ok',
-      key: { fingerprint: CLAIMED_FPR, instanceUrl: 'https://kx.example.org', provenDomains: [] },
-    })
-  })
-
-  it('returns a null instance for a key carrying no notation', async () => {
+  it('proves nothing for a key carrying no notation', async () => {
     const result = await parseKey(fixture('plain'))
 
-    expect(result).toEqual({
-      status: 'ok',
-      key: { fingerprint: PLAIN_FPR, instanceUrl: null, provenDomains: [] },
-    })
+    expect(result).toEqual({ status: 'ok', key: { fingerprint: PLAIN_FPR, provenDomains: [] } })
   })
 
-  it('finds a notation on a user id other than the first', async () => {
-    const result = await parseKey(fixture('multi'))
+  it('proves nothing for a key whose only notation is not a proof', async () => {
+    const result = await parseKey(fixture('claimed'))
 
-    expect(result).toEqual({
-      status: 'ok',
-      key: { fingerprint: MULTI_FPR, instanceUrl: 'https://kx.multi.example.org', provenDomains: [] },
-    })
+    expect(result).toEqual({ status: 'ok', key: { fingerprint: CLAIMED_FPR, provenDomains: [] } })
   })
 
   it('reads the domain a key proves over dns', async () => {
@@ -54,7 +37,7 @@ describe('parseKey', () => {
 
     expect(result).toEqual({
       status: 'ok',
-      key: { fingerprint: PROOF_FPR, instanceUrl: null, provenDomains: ['kx.example.org'] },
+      key: { fingerprint: PROOF_FPR, provenDomains: ['kx.example.org'] },
     })
   })
 
@@ -62,7 +45,9 @@ describe('parseKey', () => {
    * The one that catches openpgp.js's `notations` map: it is keyed by notation
    * name, so of this key's two `proof@ariadne.id` dns proofs it would keep
    * whichever was parsed last. Both have to survive, the legacy notation name
-   * has to be read, and the Mastodon proof has to be ignored rather than fail.
+   * has to be read, the Mastodon proof has to be ignored rather than fail, and
+   * the second user id — which carries no notations at all — has to be skipped
+   * without taking the proofs on the other one down with it.
    */
   it('reads every proof a key carries, including several under one name', async () => {
     const result = await parseKey(fixture('proofs'))
@@ -71,18 +56,17 @@ describe('parseKey', () => {
       status: 'ok',
       key: {
         fingerprint: PROOFS_FPR,
-        instanceUrl: null,
         provenDomains: ['legacy.example.org', 'multi.example.org', 'second.example.org'],
       },
     })
   })
 
   it('never exposes user ids or addresses', async () => {
-    const result = await parseKey(fixture('multi'))
+    const result = await parseKey(fixture('proofs'))
     expect(result.status).toBe('ok')
 
     if (result.status !== 'ok') return
-    expect(Object.keys(result.key).sort()).toEqual(['fingerprint', 'instanceUrl', 'provenDomains'])
+    expect(Object.keys(result.key).sort()).toEqual(['fingerprint', 'provenDomains'])
     expect(JSON.stringify(result.key)).not.toContain('example.invalid')
     expect(JSON.stringify(result.key)).not.toContain('Fixture')
   })
@@ -92,7 +76,7 @@ describe('parseKey', () => {
 
     expect(result).toEqual({
       status: 'ok',
-      key: { fingerprint: PROOF_FPR, instanceUrl: null, provenDomains: ['kx.example.org'] },
+      key: { fingerprint: PROOF_FPR, provenDomains: ['kx.example.org'] },
     })
     expect(result).toEqual(await parseKey(fixture('proof')))
   })
@@ -116,9 +100,12 @@ describe('parseKey', () => {
 })
 
 describe('selectNewestSelfCertification', () => {
-  const cert = (iso: string, notations: Record<string, string> = {}) => ({
+  const cert = (iso: string, domain?: string) => ({
     created: new Date(iso),
-    notations,
+    rawNotations:
+      domain === undefined
+        ? []
+        : [{ name: 'proof@ariadne.id', value: new TextEncoder().encode(`dns:${domain}`) }],
   })
 
   it('returns undefined when there are no certifications', () => {
@@ -131,8 +118,8 @@ describe('selectNewestSelfCertification', () => {
   })
 
   it('picks the newest regardless of array order', () => {
-    const older = cert('2024-01-01T00:00:00Z', { [NOTATION_NAME]: 'https://old.example.org' })
-    const newer = cert('2025-06-01T00:00:00Z', { [NOTATION_NAME]: 'https://new.example.org' })
+    const older = cert('2024-01-01T00:00:00Z', 'old.example.org')
+    const newer = cert('2025-06-01T00:00:00Z', 'new.example.org')
 
     expect(selectNewestSelfCertification([older, newer])).toBe(newer)
     expect(selectNewestSelfCertification([newer, older])).toBe(newer)

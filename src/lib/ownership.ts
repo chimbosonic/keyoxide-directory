@@ -1,20 +1,24 @@
 /**
- * The second half of a claim.
+ * The second half of a proof.
  *
- * The `instance@dp42.dev` notation is the operator saying "I run this
- * deployment". On its own that is one party talking to itself: anyone can sign a
- * notation naming somebody else's deployment. This module is the deployment
- * answering back — a TXT record, in the zone of the host being claimed, naming
- * the key that is allowed to claim it.
+ * A `proof@ariadne.id` notation is the operator saying "I control this domain".
+ * On its own that is one party talking to itself: anyone can sign a notation
+ * naming somebody else's domain. This module is the domain answering back — a
+ * TXT record, in the zone being claimed, naming the key allowed to claim it.
  *
- * Publishing that record requires control of the hostname's DNS, which is what
+ * Publishing that record requires control of the domain's DNS, which is what
  * makes the pair meaningful:
  *
- *   key  ──  notation   ──▶  deployment
- *   key  ◀──  TXT record ──  deployment
+ *   key  ──  proof@ariadne.id notation  ──▶  domain
+ *   key  ◀──  openpgp4fpr TXT record    ──   domain
  *
- * Note it proves control of the *hostname*, not of a path: an instance at
- * `https://example.org/keyoxide` is confirmed by a record on `example.org`.
+ * Both halves are Keyoxide's, not this directory's: an operator who has proven a
+ * domain to Keyoxide has already published everything read here. What the
+ * directory adds is only the step from a domain to a deployment served under it.
+ *
+ * That step is by *host*, never by path: an instance at
+ * `https://example.org/keyoxide` is confirmed by a record on `example.org`, and
+ * a proof cannot say anything narrower than the host it names.
  *
  * The record is read over DNS-over-HTTPS because that is the only way a page
  * with no backend can read DNS at all. Both resolvers below answer with
@@ -22,9 +26,6 @@
  * believe what the resolver tells us, and the DNSSEC `AD` flag in its reply is
  * its own claim rather than something we verify.
  */
-
-/** Underscore-prefixed so it cannot collide with a host of the same name. */
-export const RECORD_PREFIX = '_keyoxide-directory'
 
 /** Keyoxide's own fingerprint URI syntax, reused rather than invented. */
 export const FINGERPRINT_URI = 'openpgp4fpr:'
@@ -34,19 +35,6 @@ export const RESOLVERS = [
   'https://dns.google/resolve',
   'https://cloudflare-dns.com/dns-query',
 ]
-
-/**
- * The name the record must live at, or null when the instance will not parse.
- *
- * `hostname` rather than `host`, so a port never ends up in a DNS name.
- */
-export function recordName(instance: string): string | null {
-  try {
-    return `${RECORD_PREFIX}.${new URL(instance).hostname.toLowerCase()}`
-  } catch {
-    return null
-  }
-}
 
 export function dohUrls(name: string, resolvers: readonly string[] = RESOLVERS): string[] {
   const query = `name=${encodeURIComponent(name)}&type=TXT`

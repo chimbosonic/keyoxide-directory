@@ -1,5 +1,5 @@
 import { readKey } from 'openpgp'
-import { NOTATION_NAME, PROOF_NOTATION_NAMES, parseDnsClaim } from './notation'
+import { PROOF_NOTATION_NAMES, parseDnsClaim } from './notation'
 
 /**
  * What the directory needs from a key, and nothing more. User ids are
@@ -9,8 +9,6 @@ import { NOTATION_NAME, PROOF_NOTATION_NAMES, parseDnsClaim } from './notation'
 export interface ParsedKey {
   /** Uppercase hex, full length. */
   fingerprint: string
-  /** The deployment claimed by the notation, or null when the key carries none. */
-  instanceUrl: string | null
   /** Every domain the key's proof notations claim, deduped and sorted. */
   provenDomains: string[]
 }
@@ -27,7 +25,6 @@ interface RawNotation {
 
 interface SelfCertification {
   created: Date
-  notations: Record<string, string>
   rawNotations: RawNotation[]
 }
 
@@ -75,16 +72,6 @@ function findProvenDomains(
   return [...domains].sort()
 }
 
-/** Reads the instance notation off a key, scanning every user id. */
-function findInstanceUrl(users: readonly { selfCertifications: SelfCertification[] }[]): string | null {
-  for (const user of users) {
-    const newest = selectNewestSelfCertification(user.selfCertifications ?? [])
-    const claimed = newest?.notations?.[NOTATION_NAME]
-    if (typeof claimed === 'string' && claimed.length > 0) return claimed
-  }
-  return null
-}
-
 /**
  * The two transports hand us different things: the keyserver returns an armored
  * block, while WKD serves raw packets with no armor at all. Rather than armor
@@ -109,7 +96,6 @@ export async function parseKey(material: KeyMaterial): Promise<ParseResult> {
       status: 'ok',
       key: {
         fingerprint: key.getFingerprint().toUpperCase(),
-        instanceUrl: findInstanceUrl(users),
         provenDomains: findProvenDomains(users),
       },
     }

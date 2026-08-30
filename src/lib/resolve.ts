@@ -1,21 +1,22 @@
+import { deploymentHost } from './format'
 import { fetchKey, type FetchOptions } from './keyserver'
-import { claimedFingerprints, fetchOwnershipRecords, recordName } from './ownership'
+import { claimedFingerprints, fetchOwnershipRecords } from './ownership'
 import { parseKey, type KeyMaterial } from './parseKey'
 import { isHkpEntry, type KeyEntry } from './validateKeys'
 import { fetchWkdKey } from './wkd'
 
 export type ResolvedStatus =
-  /** The key claims the deployment, and the deployment names the key. */
+  /** A domain the key proves covers the instance's host, and names the key back. */
   | 'verified'
-  /** The key's claim matches, but the deployment publishes no record naming it. */
+  /** The proven domain publishes no record naming a key, so the proof is half-built. */
   | 'unconfirmed'
-  /** The deployment names a key, and it is not this one. */
+  /** The proven domain names a key, and it is not this one. */
   | 'contested'
   /** No resolver could be reached, so ownership could not be checked either way. */
   | 'dns-error'
-  /** The key carries a notation, but for a different deployment. */
+  /** The key proves domains, and none of them covers this instance's host. */
   | 'mismatch'
-  /** The key was fetched, but claims no deployment. */
+  /** The key was fetched, and proves no domain over dns at all. */
   | 'no-notation'
   /** The source has no such key: the keyserver does not hold it, or the domain publishes none. */
   | 'not-found'
@@ -37,8 +38,15 @@ export type CardStatus =
 export interface DirectoryCard {
   /** The deployment the card is for. */
   declaredInstance: string
-  /** The deployment the key itself claims, when it claims one. */
-  claimedInstance: string | null
+  /** Every domain the key proves over dns, which need not include this one's. */
+  provenDomains: string[]
+  /**
+   * The proven domain the deployment's host was confirmed under, once one covers
+   * it. Equal to the host itself in the ordinary case, and a parent of it when
+   * the operator's proof sits higher up the zone — which the card says out loud,
+   * because a parent's holder is not always the host's operator.
+   */
+  confirmedVia: string | null
   fingerprint: string | null
   status: CardStatus
   /** Human-readable detail, present only for the failure states. */
@@ -51,22 +59,37 @@ export interface ResolvedInstance extends DirectoryCard {
 }
 
 /**
- * Compares deployment URLs the way an operator would mean them: scheme and host
- * are case-insensitive, a trailing slash is meaningless, but the path is left
- * alone because paths genuinely are case-sensitive.
+ * Whether a domain the key proves vouches for a deployment's host.
+ *
+ * A proof on the host itself is the exact case. A proof on a parent covers it
+ * too, because publishing a record at `example.org` takes control of that zone,
+ * and `kx.example.org` ordinarily lives in it. Ordinarily, not always: a
+ * delegated subdomain has its own operator, and this rule lets the parent's
+ * holder confirm a deployment they do not run. That is why the covering domain
+ * is carried through to the card rather than collapsed into a yes.
+ *
+ * No public suffix list is needed to stop a proof on `co.uk` covering the world:
+ * it would first have to be published at `co.uk`.
  */
-export function normalizeInstanceUrl(url: string): string {
-  try {
-    const parsed = new URL(url)
-    const path = parsed.pathname.replace(/\/+$/, '')
-    return `${parsed.protocol}//${parsed.host.toLowerCase()}${path}${parsed.search}`
-  } catch {
-    return url.replace(/\/+$/, '')
-  }
+export function coversHost(domain: string, host: string): boolean {
+  const proven = domain.toLowerCase().replace(/\.+$/, '')
+  const target = host.toLowerCase()
+  return target === proven || target.endsWith(`.${proven}`)
 }
 
-export function sameInstance(a: string, b: string): boolean {
-  return normalizeInstanceUrl(a) === normalizeInstanceUrl(b)
+/**
+ * The proven domain that confirms a host, preferring the most specific: a key
+ * proving both `example.org` and `kx.example.org` confirms the latter under its
+ * own name, so the card has no reason to mention the parent.
+ */
+export function coveringDomain(domains: readonly string[], host: string | null): string | null {
+  if (host === null) return null
+
+  return (
+    [...domains]
+      .filter((domain) => coversHost(domain, host))
+      .sort((a, b) => b.length - a.length)[0] ?? null
+  )
 }
 
 type MaterialResult =
@@ -106,7 +129,8 @@ export async function resolveEntry(
   const base: Omit<ResolvedInstance, 'status'> = {
     entry,
     declaredInstance: entry.instance,
-    claimedInstance: null,
+    provenDomains: [],
+    confirmedVia: null,
     fingerprint: null,
   }
 
@@ -120,41 +144,38 @@ export async function resolveEntry(
     return { ...base, status: 'unreadable', reason: parsed.reason }
   }
 
-  const { fingerprint, instanceUrl } = parsed.key
-  if (instanceUrl === null) {
+  const { fingerprint, provenDomains } = parsed.key
+  if (provenDomains.length === 0) {
     return {
       ...base,
       fingerprint,
       status: 'no-notation',
-      reason: 'key claims no deployment',
+      reason: 'key proves no domain over dns',
     }
   }
 
-  if (!sameInstance(instanceUrl, entry.instance)) {
+  const confirmedVia = coveringDomain(provenDomains, deploymentHost(entry.instance))
+  if (confirmedVia === null) {
     return {
       ...base,
       fingerprint,
-      claimedInstance: instanceUrl,
+      provenDomains,
       status: 'mismatch',
-      reason: 'key claims a different deployment',
+      reason: 'the key proves no domain covering this deployment',
     }
   }
 
-  // The key's half is settled; now ask the deployment. Only reached once the
-  // claim itself holds up, so the statuses stay disjoint and no entry that has
+  // The key's half is settled; now ask the domain it names. Only reached once a
+  // proof covers the host, so the statuses stay disjoint and no entry that has
   // already failed costs a DNS query.
   const claimed: Omit<ResolvedInstance, 'status'> = {
     ...base,
     fingerprint,
-    claimedInstance: instanceUrl,
+    provenDomains,
+    confirmedVia,
   }
 
-  const name = recordName(entry.instance)
-  if (name === null) {
-    return { ...claimed, status: 'dns-error', reason: `not a url: ${entry.instance}` }
-  }
-
-  const records = await fetchOwnershipRecords(name, { fetch: options.fetch })
+  const records = await fetchOwnershipRecords(confirmedVia, { fetch: options.fetch })
   if (records.status === 'lookup-error') {
     return { ...claimed, status: 'dns-error', reason: records.reason }
   }
@@ -164,7 +185,7 @@ export async function resolveEntry(
     return {
       ...claimed,
       status: 'unconfirmed',
-      reason: 'the deployment publishes no record naming a key',
+      reason: `${confirmedVia} publishes no record naming a key`,
     }
   }
 
@@ -172,7 +193,7 @@ export async function resolveEntry(
     return {
       ...claimed,
       status: 'contested',
-      reason: 'the deployment names a different key',
+      reason: `${confirmedVia} names a different key`,
     }
   }
 

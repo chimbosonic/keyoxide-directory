@@ -7,8 +7,8 @@
 export const REPOSITORY_URL = 'https://github.com/chimbosonic/keyoxide-directory'
 
 /**
- * Instructions for adding an instance: the notation to sign, the entry shape,
- * and which lookup to pick. The README points at the same file, so a contributor
+ * Instructions for adding an instance: the proof to publish, the signature to
+ * make, the entry shape, and which lookup to pick. The README points at the same file, so a contributor
  * arriving from either direction reads the same thing.
  */
 export const ADD_INSTANCE_URL = `${REPOSITORY_URL}/blob/main/.github/pull_request_template.md`

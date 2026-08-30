@@ -1,12 +1,16 @@
 import { readFileSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
-import { normalizeInstanceUrl, resolveAll, resolveEntry, sameInstance } from './resolve'
+import { coveringDomain, coversHost, resolveAll, resolveEntry } from './resolve'
 import type { KeyEntry } from './validateKeys'
 
 const fixture = (name: string) =>
   readFileSync(resolvePath(__dirname, '../../tests/fixtures/keys', `${name}.asc`), 'utf8')
 
-const CLAIMED_FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
+/** Proves kx.example.org, and nothing else. */
+const PROOF_FPR = '125201CAF360D90D52549F62A0A332F5361EB31F'
+/** Proves legacy.example.org, multi.example.org and second.example.org. */
+const PROOFS_FPR = '7853FDF799B81400814C279B187149C137000B9D'
+/** Proves nothing: no notations at all. */
 const PLAIN_FPR = 'E9B57E7488818FE8A72CB8A20A6899A0D2FBBD4E'
 
 const entry = (instance: string): KeyEntry => ({
@@ -46,89 +50,133 @@ const ownershipAnswer = (...fingerprints: string[]) =>
   )
 
 /**
- * Routes a request the way the two halves of a claim are really fetched: the key
- * from a keyserver or a WKD host, the ownership record from a DoH resolver. The
- * default owner is the fixture's own key, so an entry that claims correctly
- * verifies.
+ * Routes a request the way the two halves of a proof are really fetched: the key
+ * from a keyserver or a WKD host, the record from a DoH resolver. The default
+ * owner is the fixture's own key, so a key proving the right domain verifies.
  */
-const serve = (
-  key: () => Response,
-  owner: () => Response = () => ownershipAnswer(CLAIMED_FPR),
-) => vi.fn(async (input: FetchInput) => (DOH.test(String(input)) ? owner() : key()))
+const serve = (key: () => Response, owner: () => Response = () => ownershipAnswer(PROOF_FPR)) =>
+  vi.fn(async (input: FetchInput) => (DOH.test(String(input)) ? owner() : key()))
 
 const serving = (body: string, status = 200) => serve(() => new Response(body, { status }))
 
-describe('normalizeInstanceUrl', () => {
-  it('strips a trailing slash', () => {
-    expect(normalizeInstanceUrl('https://kx.example.org/')).toBe('https://kx.example.org')
+describe('coversHost', () => {
+  it('covers the host it names', () => {
+    expect(coversHost('kx.example.org', 'kx.example.org')).toBe(true)
   })
 
-  it('lower-cases the host', () => {
-    expect(normalizeInstanceUrl('https://KX.Example.ORG')).toBe('https://kx.example.org')
+  it('covers a subdomain of itself, whose zone it controls', () => {
+    expect(coversHost('example.org', 'kx.example.org')).toBe(true)
+    expect(coversHost('example.org', 'a.b.example.org')).toBe(true)
   })
 
-  it('preserves path casing, which is significant', () => {
-    expect(normalizeInstanceUrl('https://kx.example.org/Profile')).toBe(
-      'https://kx.example.org/Profile',
-    )
+  it('does not cover a parent of itself', () => {
+    expect(coversHost('kx.example.org', 'example.org')).toBe(false)
   })
 
-  it('falls back to trimming when the URL will not parse', () => {
-    expect(normalizeInstanceUrl('not a url/')).toBe('not a url')
+  it('does not cover a sibling', () => {
+    expect(coversHost('kx.example.org', 'other.example.org')).toBe(false)
+  })
+
+  // The one a naive suffix check gets wrong: matching has to be by label.
+  it('does not cover a host that merely ends with its name', () => {
+    expect(coversHost('example.org', 'notexample.org')).toBe(false)
+  })
+
+  it('ignores casing and a trailing root label', () => {
+    expect(coversHost('Example.ORG.', 'kx.example.org')).toBe(true)
   })
 })
 
-describe('sameInstance', () => {
-  it('ignores a trailing slash and host casing', () => {
-    expect(sameInstance('https://KX.example.org/', 'https://kx.example.org')).toBe(true)
+describe('coveringDomain', () => {
+  it('returns null when nothing the key proves covers the host', () => {
+    expect(coveringDomain(['other.example.org'], 'kx.example.org')).toBeNull()
   })
 
-  it('distinguishes different hosts', () => {
-    expect(sameInstance('https://one.example.org', 'https://two.example.org')).toBe(false)
+  it('returns null for a host that would not parse', () => {
+    expect(coveringDomain(['example.org'], null)).toBeNull()
   })
 
-  it('distinguishes paths differing only in case', () => {
-    expect(sameInstance('https://kx.example.org/a', 'https://kx.example.org/A')).toBe(false)
+  // A key proving both means the card has no reason to mention the parent.
+  it('prefers the most specific proof', () => {
+    expect(coveringDomain(['example.org', 'kx.example.org'], 'kx.example.org')).toBe(
+      'kx.example.org',
+    )
   })
 })
 
 describe('resolveEntry', () => {
-  it('verifies a key whose notation matches the declared deployment', async () => {
+  it('verifies a key that proves the deployment’s host', async () => {
     const result = await resolveEntry(entry('https://kx.example.org'), {
-      fetch: serving(fixture('claimed')),
+      fetch: serving(fixture('proof')),
     })
 
     expect(result.status).toBe('verified')
-    expect(result.fingerprint).toBe(CLAIMED_FPR)
-    expect(result.claimedInstance).toBe('https://kx.example.org')
+    expect(result.fingerprint).toBe(PROOF_FPR)
+    expect(result.confirmedVia).toBe('kx.example.org')
     expect(result.reason).toBeUndefined()
   })
 
-  it('verifies despite a trailing slash difference', async () => {
-    const result = await resolveEntry(entry('https://kx.example.org/'), {
-      fetch: serving(fixture('claimed')),
-    })
-    expect(result.status).toBe('verified')
+  it('verifies despite a trailing slash or a path, which the host ignores', async () => {
+    for (const instance of ['https://kx.example.org/', 'https://kx.example.org/keyoxide']) {
+      const result = await resolveEntry(entry(instance), { fetch: serving(fixture('proof')) })
+      expect(result.status).toBe('verified')
+    }
   })
 
-  it('reports a mismatch when the key claims a different deployment', async () => {
+  it('verifies a deployment on a subdomain of a proven domain, and says which', async () => {
+    const result = await resolveEntry(entry('https://kx.multi.example.org'), {
+      fetch: serve(
+        () => new Response(fixture('proofs')),
+        () => ownershipAnswer(PROOFS_FPR),
+      ),
+    })
+
+    expect(result.status).toBe('verified')
+    expect(result.confirmedVia).toBe('multi.example.org')
+  })
+
+  it('asks the proven domain about the key, not the deployment’s own host', async () => {
+    const fetchImpl = serve(
+      () => new Response(fixture('proofs')),
+      () => ownershipAnswer(PROOFS_FPR),
+    )
+    await resolveEntry(entry('https://kx.multi.example.org'), { fetch: fetchImpl })
+
+    const resolverCall = fetchImpl.mock.calls
+      .map(([input]) => String(input))
+      .find((url) => DOH.test(url))
+
+    expect(resolverCall).toContain(encodeURIComponent('multi.example.org'))
+    expect(resolverCall).not.toContain(encodeURIComponent('kx.multi.example.org'))
+  })
+
+  it('reports a mismatch when the key proves no domain covering the deployment', async () => {
     const result = await resolveEntry(entry('https://other.example.org'), {
-      fetch: serving(fixture('claimed')),
+      fetch: serving(fixture('proof')),
     })
 
     expect(result.status).toBe('mismatch')
-    expect(result.claimedInstance).toBe('https://kx.example.org')
+    expect(result.provenDomains).toEqual(['kx.example.org'])
     expect(result.declaredInstance).toBe('https://other.example.org')
+    expect(result.confirmedVia).toBeNull()
   })
 
-  it('reports no-notation when the key claims nothing', async () => {
+  it('reports no-notation when the key proves nothing at all', async () => {
     const result = await resolveEntry(entry('https://kx.example.org'), {
       fetch: serving(fixture('plain')),
     })
 
     expect(result.status).toBe('no-notation')
     expect(result.fingerprint).toBe(PLAIN_FPR)
-    expect(result.claimedInstance).toBeNull()
+    expect(result.provenDomains).toEqual([])
+  })
+
+  it('reports no-notation for a key whose notations are not proofs', async () => {
+    const result = await resolveEntry(entry('https://kx.example.org'), {
+      fetch: serving(fixture('claimed')),
+    })
+
+    expect(result.status).toBe('no-notation')
   })
 
   it('reports not-found on a 404', async () => {
@@ -159,26 +207,25 @@ describe('resolveEntry', () => {
     expect(result.status).toBe('unreadable')
   })
 
-  it('does not verify a key the deployment says nothing about', async () => {
-    // The impersonation case: the notation matches the entry perfectly, because
-    // both halves were written by whoever holds the key. Only the deployment can
-    // settle it, and here it has not.
+  it('does not verify a key the domain says nothing about', async () => {
+    // The half-built proof: the key claims the domain, which anyone can sign.
+    // Only the domain can settle it, and here it has not.
     const result = await resolveEntry(entry('https://kx.example.org'), {
       fetch: serve(
-        () => new Response(fixture('claimed')),
+        () => new Response(fixture('proof')),
         () => new Response(JSON.stringify({ Status: 0 }), { status: 200 }),
       ),
     })
 
     expect(result.status).toBe('unconfirmed')
-    expect(result.fingerprint).toBe(CLAIMED_FPR)
-    expect(result.claimedInstance).toBe('https://kx.example.org')
+    expect(result.fingerprint).toBe(PROOF_FPR)
+    expect(result.confirmedVia).toBe('kx.example.org')
   })
 
-  it('flags a deployment that names a different key', async () => {
+  it('flags a domain that names a different key', async () => {
     const result = await resolveEntry(entry('https://kx.example.org'), {
       fetch: serve(
-        () => new Response(fixture('claimed')),
+        () => new Response(fixture('proof')),
         () => ownershipAnswer(PLAIN_FPR),
       ),
     })
@@ -186,11 +233,11 @@ describe('resolveEntry', () => {
     expect(result.status).toBe('contested')
   })
 
-  it('verifies when the deployment names this key among several', async () => {
+  it('verifies when the domain names this key among several', async () => {
     const result = await resolveEntry(entry('https://kx.example.org'), {
       fetch: serve(
-        () => new Response(fixture('claimed')),
-        () => ownershipAnswer(PLAIN_FPR, CLAIMED_FPR),
+        () => new Response(fixture('proof')),
+        () => ownershipAnswer(PLAIN_FPR, PROOF_FPR),
       ),
     })
 
@@ -200,28 +247,28 @@ describe('resolveEntry', () => {
   it('accepts a record whose hex is lower case', async () => {
     const result = await resolveEntry(entry('https://kx.example.org'), {
       fetch: serve(
-        () => new Response(fixture('claimed')),
-        () => ownershipAnswer(CLAIMED_FPR.toLowerCase()),
+        () => new Response(fixture('proof')),
+        () => ownershipAnswer(PROOF_FPR.toLowerCase()),
       ),
     })
 
     expect(result.status).toBe('verified')
   })
 
-  it('treats an unreachable resolver as unknown, not as a failed claim', async () => {
+  it('treats an unreachable resolver as unknown, not as a failed proof', async () => {
     const result = await resolveEntry(entry('https://kx.example.org'), {
       fetch: vi.fn(async (input: FetchInput) => {
         if (DOH.test(String(input))) throw new TypeError('Failed to fetch')
-        return new Response(fixture('claimed'))
+        return new Response(fixture('proof'))
       }),
     })
 
     expect(result.status).toBe('dns-error')
   })
 
-  it('does not ask about ownership for a claim that already failed', async () => {
-    // A key claiming somewhere else is settled without a resolver being troubled.
-    const fetchImpl = serve(() => new Response(fixture('claimed')))
+  it('does not ask about ownership for a proof that already failed', async () => {
+    // A key proving somewhere else is settled without a resolver being troubled.
+    const fetchImpl = serve(() => new Response(fixture('proof')))
     await resolveEntry(entry('https://other.example.org'), { fetch: fetchImpl })
 
     const requested = fetchImpl.mock.calls.map(([input]) => String(input))
@@ -229,11 +276,11 @@ describe('resolveEntry', () => {
   })
 
   it('resolves a wkd entry from its domain, not the keyserver', async () => {
-    const fetchImpl = serve(() => new Response(binaryFixture('claimed'), { status: 200 }))
+    const fetchImpl = serve(() => new Response(binaryFixture('proof'), { status: 200 }))
     const result = await resolveEntry(wkdEntry('https://kx.example.org'), { fetch: fetchImpl })
 
     expect(result.status).toBe('verified')
-    expect(result.fingerprint).toBe(CLAIMED_FPR)
+    expect(result.fingerprint).toBe(PROOF_FPR)
 
     const requested = fetchImpl.mock.calls.map(([input]) => String(input))
     expect(requested[0]).toBe(
@@ -245,10 +292,10 @@ describe('resolveEntry', () => {
   it('falls back from the advanced wkd url to the direct one', async () => {
     const fetchImpl = vi.fn(async (input: FetchInput) => {
       const url = String(input)
-      if (DOH.test(url)) return ownershipAnswer(CLAIMED_FPR)
+      if (DOH.test(url)) return ownershipAnswer(PROOF_FPR)
       return url.startsWith('https://openpgpkey.')
         ? new Response('', { status: 404 })
-        : new Response(binaryFixture('claimed'), { status: 200 })
+        : new Response(binaryFixture('proof'), { status: 200 })
     })
     const result = await resolveEntry(wkdEntry('https://kx.example.org'), { fetch: fetchImpl })
 
@@ -279,24 +326,13 @@ describe('resolveEntry', () => {
     ])
   })
 
-  it('classifies a wkd key claiming a different deployment as a mismatch', async () => {
+  it('classifies a wkd key proving somewhere else as a mismatch', async () => {
     const result = await resolveEntry(wkdEntry('https://other.example.org'), {
-      fetch: serve(() => new Response(binaryFixture('claimed'), { status: 200 })),
+      fetch: serve(() => new Response(binaryFixture('proof'), { status: 200 })),
     })
 
     expect(result.status).toBe('mismatch')
-    expect(result.claimedInstance).toBe('https://kx.example.org')
-  })
-
-  it('looks the ownership record up under the declared instance host', async () => {
-    const fetchImpl = serve(() => new Response(fixture('claimed')))
-    await resolveEntry(entry('https://kx.example.org'), { fetch: fetchImpl })
-
-    const resolverCall = fetchImpl.mock.calls
-      .map(([input]) => String(input))
-      .find((url) => DOH.test(url))
-
-    expect(resolverCall).toContain(encodeURIComponent('_keyoxide-directory.kx.example.org'))
+    expect(result.provenDomains).toEqual(['kx.example.org'])
   })
 
   it('carries the declared instance through every failure state', async () => {
@@ -314,14 +350,14 @@ describe('resolveEntry', () => {
 describe('resolveAll', () => {
   it('resolves each entry independently so one failure does not hide the others', async () => {
     const bodies = new Map([
-      ['https://kx.example.org', fixture('claimed')],
+      ['https://kx.example.org', fixture('proof')],
       ['https://plain.example.org', fixture('plain')],
     ])
 
     let call = 0
     const order = ['https://kx.example.org', 'https://plain.example.org', 'missing']
     const fetchImpl = vi.fn(async (input: FetchInput) => {
-      if (DOH.test(String(input))) return ownershipAnswer(CLAIMED_FPR)
+      if (DOH.test(String(input))) return ownershipAnswer(PROOF_FPR)
       const key = order[call++]
       const body = bodies.get(key ?? '')
       return body ? new Response(body) : new Response('', { status: 404 })

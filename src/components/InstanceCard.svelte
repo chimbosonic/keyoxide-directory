@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { instanceHost, shortKeyId } from '../lib/format'
+  import { deploymentHost, instanceHost, shortKeyId } from '../lib/format'
   import type { Liveness } from '../lib/probe'
   import type { CardStatus, DirectoryCard } from '../lib/resolve'
 
@@ -14,8 +14,8 @@
     unconfirmed: 'domain name does not confirm key',
     contested: 'domain name links another key',
     'dns-error': 'domain name lookup failed',
-    mismatch: 'key claims another instance',
-    'no-notation': 'no claim on key',
+    mismatch: 'key proves another domain',
+    'no-notation': 'no domain proof on key',
     'not-found': 'key not found',
     unreadable: 'key unreadable',
     'fetch-error': 'key lookup failed',
@@ -28,7 +28,22 @@
   }
 
   const keyId = $derived(shortKeyId(instance.fingerprint))
-  const label = $derived(LABELS[instance.status])
+
+  /**
+   * A proof on a parent domain confirms a deployment on a subdomain, because
+   * publishing the record takes control of the zone the subdomain sits in. That
+   * is not the same as controlling the subdomain — a delegated one has its own
+   * operator — so the card names the domain the confirmation actually came from
+   * rather than presenting it as the deployment's own.
+   */
+  const via = $derived(
+    instance.status === 'verified' &&
+      instance.confirmedVia !== null &&
+      instance.confirmedVia !== deploymentHost(instance.declaredInstance)
+      ? instance.confirmedVia
+      : null,
+  )
+  const label = $derived(via === null ? LABELS[instance.status] : `verified via ${via}`)
   const ok = $derived(instance.status === 'verified')
   // The pinned card is neither verified nor failing: it makes no claim to check,
   // so its dot stays neutral rather than warning about a key that never existed.
@@ -66,13 +81,13 @@
 
   <!--
     No reason line. The status pill already names what went wrong, and repeating
-    it underneath in other words ("no claim on key" / "key claims no deployment")
-    added noise rather than information. The competing deployment stays, because
-    which one a key claims is not something the pill can say.
+    it underneath in other words ("no domain proof on key" / "key proves no
+    domain over dns") added noise rather than information. The domains the key
+    does prove stay, because the pill cannot name them.
   -->
-  {#if instance.status === 'mismatch' && instance.claimedInstance}
+  {#if instance.status === 'mismatch' && instance.provenDomains.length > 0}
     <p class="muted">
-      key claims <span class="code inline">{instance.claimedInstance}</span>
+      key proves <span class="code inline">{instance.provenDomains.join(', ')}</span>
     </p>
   {/if}
 </article>

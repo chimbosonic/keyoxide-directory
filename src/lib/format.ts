@@ -22,3 +22,21 @@ export function instanceHost(url: string): string {
     return url
   }
 }
+
+/**
+ * The DNS name a deployment is served under, or null when its URL will not parse.
+ *
+ * `hostname` rather than the `host` above, so a port never ends up compared with
+ * a domain: the title is for reading, this is for looking up.
+ *
+ * It lives here rather than beside the resolver so the card can import it. Value
+ * imports from `resolve` pull OpenPGP.js in with them, which keeps it out of the
+ * initial bundle chunk and cannot be loaded under jsdom at all.
+ */
+export function deploymentHost(instance: string): string | null {
+  try {
+    return new URL(instance).hostname.toLowerCase()
+  } catch {
+    return null
+  }
+}

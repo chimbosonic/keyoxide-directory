@@ -1,4 +1,4 @@
-import { instanceHost, shortKeyId } from './format'
+import { deploymentHost, instanceHost, shortKeyId } from './format'
 
 describe('shortKeyId', () => {
   it('renders the last 16 characters of a full fingerprint, grouped', () => {
@@ -37,5 +37,19 @@ describe('instanceHost', () => {
 
   it('falls back to the raw string when it will not parse', () => {
     expect(instanceHost('not a url')).toBe('not a url')
+  })
+})
+
+describe('deploymentHost', () => {
+  it('reads the host out of a deployment url', () => {
+    expect(deploymentHost('https://kx.example.org/profile/abc')).toBe('kx.example.org')
+  })
+
+  it('lower-cases it, and leaves the port out of a name that will be looked up', () => {
+    expect(deploymentHost('https://KX.Example.ORG:8443')).toBe('kx.example.org')
+  })
+
+  it('returns null for something that is not a url', () => {
+    expect(deploymentHost('not a url')).toBeNull()
   })
 })

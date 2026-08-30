@@ -1,17 +1,16 @@
 import {
   FINGERPRINT_URI,
-  RECORD_PREFIX,
   RESOLVERS,
   claimedFingerprints,
   dohUrls,
   fetchOwnershipRecords,
   parseTxtData,
-  recordName,
 } from './ownership'
 
 const FPR = 'AC48BC1F029B6188D97E2D807C855DB4466DF0C6'
 const OTHER = '3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11'
-const NAME = `${RECORD_PREFIX}.keyoxide.dp42.dev`
+/** A proof names its own domain, so the lookup asks about the domain itself. */
+const NAME = 'keyoxide.dp42.dev'
 
 /** fetch is overloaded and takes more than a string, so mocks must match its signature. */
 type FetchInput = Parameters<typeof globalThis.fetch>[0]
@@ -35,29 +34,6 @@ const NODATA = {
   Authority: [{ name: 'dp42.dev.', type: 6, TTL: 1800, data: 'peaches.ns.cloudflare.com. ...' }],
 }
 
-describe('recordName', () => {
-  it('prefixes the instance hostname', () => {
-    expect(recordName('https://keyoxide.dp42.dev')).toBe(NAME)
-  })
-
-  it('ignores a trailing slash and a path', () => {
-    expect(recordName('https://keyoxide.dp42.dev/')).toBe(NAME)
-    expect(recordName('https://keyoxide.dp42.dev/profile/abc')).toBe(NAME)
-  })
-
-  it('lower-cases the host, which is case-insensitive', () => {
-    expect(recordName('https://Keyoxide.DP42.dev')).toBe(NAME)
-  })
-
-  it('leaves a port out of the dns name, which cannot contain one', () => {
-    expect(recordName('https://kx.example.org:8443')).toBe(`${RECORD_PREFIX}.kx.example.org`)
-  })
-
-  it('returns null rather than throwing for something that is not a url', () => {
-    expect(recordName('not a url')).toBeNull()
-  })
-})
-
 describe('dohUrls', () => {
   it('queries every resolver for the same TXT name', () => {
     const urls = dohUrls(NAME)
@@ -68,7 +44,7 @@ describe('dohUrls', () => {
   })
 
   it('percent-encodes the underscore-prefixed name', () => {
-    expect(dohUrls(NAME)[0]).toContain('_keyoxide-directory')
+    expect(dohUrls(NAME)[0]).toContain(encodeURIComponent(NAME))
   })
 })
 

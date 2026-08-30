@@ -7,7 +7,8 @@ const FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 const resolved = (overrides: Partial<ResolvedInstance> = {}): ResolvedInstance => ({
   entry: { type: 'hkp' as const, fingerprint: FPR, instance: 'https://kx.example.org' },
   declaredInstance: 'https://kx.example.org',
-  claimedInstance: 'https://kx.example.org',
+  provenDomains: ['kx.example.org'],
+  confirmedVia: 'kx.example.org',
   fingerprint: FPR,
   status: 'verified',
   ...overrides,
@@ -16,7 +17,8 @@ const resolved = (overrides: Partial<ResolvedInstance> = {}): ResolvedInstance =
 describe('InstanceCard, pinned project instance', () => {
   const project: DirectoryCard = {
     declaredInstance: 'https://keyoxide.org',
-    claimedInstance: null,
+    provenDomains: [],
+    confirmedVia: null,
     fingerprint: null,
     status: 'project',
   }
@@ -77,8 +79,8 @@ describe('InstanceCard', () => {
   })
 
   const failures: Array<[ResolvedStatus, string]> = [
-    ['mismatch', 'key claims another instance'],
-    ['no-notation', 'no claim on key'],
+    ['mismatch', 'key proves another domain'],
+    ['no-notation', 'no domain proof on key'],
     ['not-found', 'key not found'],
     ['unreadable', 'key unreadable'],
     ['fetch-error', 'key lookup failed'],
@@ -86,7 +88,7 @@ describe('InstanceCard', () => {
 
   it.each(failures)('marks %s with the warn dot and its label', (status, label) => {
     const { container } = render(InstanceCard, {
-      instance: resolved({ status, claimedInstance: null }),
+      instance: resolved({ status, provenDomains: [], confirmedVia: null }),
     })
 
     expect(screen.getByTestId('verification')).toHaveTextContent(label)
@@ -94,21 +96,65 @@ describe('InstanceCard', () => {
     expect(container.querySelector('.dot.ok')).toBeNull()
   })
 
-  it('shows the competing deployment on a mismatch', () => {
+  it('shows the domains the key proves instead, on a mismatch', () => {
     render(InstanceCard, {
       instance: resolved({
         status: 'mismatch',
-        claimedInstance: 'https://elsewhere.example.org',
-        reason: 'key claims a different deployment',
+        provenDomains: ['elsewhere.example.org', 'other.example.org'],
+        confirmedVia: null,
+        reason: 'the key proves no domain covering this deployment',
       }),
     })
 
-    expect(screen.getByText(/elsewhere.example.org/)).toBeInTheDocument()
+    expect(screen.getByText(/elsewhere.example.org, other.example.org/)).toBeInTheDocument()
+  })
+
+  /**
+   * A proof on a parent confirms the host, but the parent's holder is not
+   * always the host's operator, so the card names where the confirmation came
+   * from rather than letting it read as the deployment's own.
+   */
+  it('names the parent domain when the proof came from higher up the zone', () => {
+    const { container } = render(InstanceCard, {
+      instance: resolved({
+        declaredInstance: 'https://kx.example.org',
+        provenDomains: ['example.org'],
+        confirmedVia: 'example.org',
+      }),
+    })
+
+    expect(screen.getByTestId('verification')).toHaveTextContent('verified via example.org')
+    expect(container.querySelector('.dot.ok')).not.toBeNull()
+  })
+
+  it('says plain verified when the deployment’s own host is what was proven', () => {
+    render(InstanceCard, { instance: resolved({ confirmedVia: 'kx.example.org' }) })
+
+    expect(screen.getByTestId('verification')).toHaveTextContent('verified')
+    expect(screen.getByTestId('verification')).not.toHaveTextContent('via')
+  })
+
+  // The host a proof is compared against carries no port, so a deployment on a
+  // non-default port must not read as confirmed by somewhere else.
+  it('says plain verified for a deployment on a port', () => {
+    render(InstanceCard, {
+      instance: resolved({
+        declaredInstance: 'https://kx.example.org:8443',
+        confirmedVia: 'kx.example.org',
+      }),
+    })
+
+    expect(screen.getByTestId('verification')).not.toHaveTextContent('via')
   })
 
   it('explains when the key was never retrieved', () => {
     render(InstanceCard, {
-      instance: resolved({ status: 'not-found', fingerprint: null, claimedInstance: null }),
+      instance: resolved({
+        status: 'not-found',
+        fingerprint: null,
+        provenDomains: [],
+        confirmedVia: null,
+      }),
     })
 
     expect(screen.queryByTestId('key-id')).toBeNull()
@@ -120,7 +166,8 @@ describe('InstanceCard', () => {
       instance: resolved({
         status: 'fetch-error',
         fingerprint: null,
-        claimedInstance: null,
+        provenDomains: [],
+        confirmedVia: null,
         reason: 'Failed to fetch',
       }),
     })
@@ -147,13 +194,14 @@ describe('InstanceCard', () => {
     render(InstanceCard, {
       instance: resolved({
         status: 'no-notation',
-        claimedInstance: null,
-        reason: 'key claims no deployment',
+        provenDomains: [],
+        confirmedVia: null,
+        reason: 'key proves no domain over dns',
       }),
     })
 
-    expect(screen.queryByText('key claims no deployment')).toBeNull()
-    expect(screen.getByTestId('verification')).toHaveTextContent('no claim on key')
+    expect(screen.queryByText('key proves no domain over dns')).toBeNull()
+    expect(screen.getByTestId('verification')).toHaveTextContent('no domain proof on key')
   })
 
   it('shows no liveness pill until a probe has answered', () => {
@@ -187,7 +235,7 @@ describe('InstanceCard', () => {
   it('keeps verification and liveness as separate pills', () => {
     render(InstanceCard, { instance: resolved({ status: 'no-notation' }), liveness: 'online' })
 
-    expect(screen.getByTestId('verification')).toHaveTextContent('no claim on key')
+    expect(screen.getByTestId('verification')).toHaveTextContent('no domain proof on key')
     expect(screen.getByTestId('liveness')).toHaveTextContent('online')
   })
 })

@@ -9,13 +9,16 @@ const FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 
 const entry = (instance: string): KeyEntry => ({ type: 'hkp', fingerprint: FPR, instance })
 
+const instanceHostOf = (instance: string) => new URL(instance).hostname
+
 const resolved = (
   instance: string,
   status: ResolvedInstance['status'] = 'verified',
 ): ResolvedInstance => ({
   entry: entry(instance),
   declaredInstance: instance,
-  claimedInstance: status === 'verified' ? instance : null,
+  provenDomains: status === 'verified' ? [instanceHostOf(instance)] : [],
+  confirmedVia: status === 'verified' ? instanceHostOf(instance) : null,
   fingerprint: status === 'not-found' ? null : FPR,
   status,
 })

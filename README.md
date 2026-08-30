@@ -2,91 +2,123 @@
 
 A directory of [Keyoxide](https://keyoxide.org) deployments, built entirely in
 the browser. There is no backend: the page ships with a list of operator key
-identifiers, fetches each key, and reads a notation off the key in which the
-operator claims the deployment they run.
+identifiers, fetches each key, and reads the DNS proofs the operator has already
+published to Keyoxide.
 
 **[Add your deployment](.github/pull_request_template.md)** — it is a one-entry
 change to `src/data/keys.json`.
 
-## How a deployment is claimed
+## How a deployment is verified
 
-Keyoxide itself defines no notation meaning "this is the deployment I run". Its
-parsing library reads only `proof@ariadne.id` and the legacy
-`proof@metacode.biz`, and both carry identity *proofs* — Mastodon, Keybase, DNS —
-rather than deployment URLs. That is deliberate on Keyoxide's part: every
-deployment renders any key, so a key is not bound to one.
+Keyoxide defines no notation meaning "this is the deployment I run", and it never
+needed one: every deployment renders any key, so a key is not bound to one.
 
-This directory therefore defines its own notation, `instance@dp42.dev`,
-namespaced under a controlled domain as RFC 9580 requires.
-
-That notation alone proves less than it appears to. It is the operator saying "I
-run this deployment", and the entry in `keys.json` says the same thing — both
-written by whoever holds the key. On its own it is one party talking to itself,
-and anyone could sign a notation naming a deployment they have nothing to do
-with. So the deployment has to answer back:
+What operators do already have is a DNS proof — Keyoxide's own, read by doipjs
+under the `proof@ariadne.id` notation and its legacy alias `proof@metacode.biz`:
 
 ```
-key  ──  instance@dp42.dev notation  ──▶  deployment
-key  ◀──  _keyoxide-directory TXT     ──  deployment
+key  ──  proof@ariadne.id=dns:example.org?type=TXT  ──▶  domain
+key  ◀──  TXT "openpgp4fpr:<fingerprint>"           ──   domain
 ```
 
-An entry verifies only when both directions agree: the key names the deployment,
-and a TXT record in that host's zone names the key. Publishing the record needs
-control of the hostname's DNS, which is what the operator has and an impersonator
-does not.
+Both halves are needed. The notation alone is the operator saying "I control this
+domain", which anyone can sign about a domain they have nothing to do with; the
+record alone is a domain naming a key that never answered. Together they prove
+the key controls the domain's DNS.
 
-The record proves control of the *hostname*, not of a path — an instance at
-`https://example.org/keyoxide` is confirmed by a record on `example.org`. And the
-trust is not cryptographic: the record is read over DNS-over-HTTPS, so we believe
-what the resolver tells us. Its DNSSEC `AD` flag is the resolver's own claim
-rather than something checked here.
+The directory adds one step: from a domain to a deployment served under it. An
+entry verifies when a domain the key proves **covers the deployment's host** —
+the host itself, or a parent of it. Publishing at `example.org` takes control of
+that zone, and `kx.example.org` ordinarily lives in it.
+
+Ordinarily, not always. A delegated subdomain has its own operator, and this rule
+lets the parent's holder confirm a deployment they do not run. So the card names
+the domain the confirmation came from whenever it was not the deployment's own
+host — *verified via example.org* rather than a bare *verified*.
+
+Verification is by host, never by path: an instance at
+`https://example.org/keyoxide` is confirmed by a record on `example.org`, and no
+proof can say anything narrower than the host it names. And the trust is not
+cryptographic: the record is read over DNS-over-HTTPS, so we believe what the
+resolver tells us. Its DNSSEC `AD` flag is the resolver's own claim rather than
+something checked here.
+
+## Consent, and where it is checked
+
+A proof says the key controls the host. It never mentions this directory — it was
+published for Keyoxide — and anyone can read it on an operator's behalf. So each
+entry also carries a detached signature, made by the operator's own key, over a
+string naming the deployment being listed:
+
+```
+keyoxide-directory listing v1
+instance=https://kx.example.org
+```
+
+That signature is a merge-time gate, not a rendering state. `npm run
+verify:entries` checks it in CI, where a pull request can be refused; the page
+never reads it, and no card status depends on it. A visitor could do nothing with
+the answer, and by the time an entry is merged the directory has already taken
+the operator's word for it.
+
+The instance is signed verbatim, so editing the URL afterwards invalidates the
+signature even if it still resolves to the same place.
 
 ## What a card shows
 
 keyoxide.org leads the grid as a pinned card. It cannot arrive the ordinary way
-— a card is earned by carrying an `instance@dp42.dev` notation, and the Keyoxide
-project has no reason to sign a notation namespaced under this directory's
-domain — so rather than leave the best-known deployment out of a directory of
-deployments, it is pinned. It is probed for liveness like any other, and kept
-out of the verified count, because nothing about it was verified.
+— an entry is listed on the operator's signature over it, and the Keyoxide
+project has signed nothing of the sort — so rather than leave the best-known
+deployment out of a directory of deployments, it is pinned. It is probed for
+liveness like any other, and kept out of the verified count, because nothing
+about it was verified.
 
 Every other card shows two independent pills:
 
 | | |
 |---|---|
-| **project instance** | pinned by the directory; no key, and nothing claimed |
-| **verified** | the key names the deployment, and the deployment names the key |
-| **deployment does not confirm** | the key's claim matches, but the host publishes no record |
-| **deployment names another key** | the host publishes a record, for somebody else |
-| **confirmation lookup failed** | no resolver could be reached, so ownership is unknown |
-| **claims another deployment** | the key carries a notation, for somewhere else |
-| **no claim on key** | the key was fetched but carries no notation |
+| **project instance** | pinned by the directory; no key, and nothing proven |
+| **verified** | the key proves the deployment's own host, and that host names the key |
+| **verified via `<domain>`** | the same, but proven on a parent of the host rather than the host itself |
+| **domain name does not confirm key** | the key proves the domain, but the domain publishes no record |
+| **domain name links another key** | the domain publishes a record, for somebody else |
+| **domain name lookup failed** | no resolver could be reached, so ownership is unknown |
+| **key proves another domain** | the key carries dns proofs, none covering this deployment |
+| **no domain proof on key** | the key was fetched but proves no domain over dns |
 | **key not found** | the source has no such key: the keyserver does not hold it, or the domain publishes none |
 | **key unreadable** | the key was fetched but could not be parsed |
-| **lookup failed** | network, CORS, or a server error |
+| **key lookup failed** | network, CORS, or a server error |
 
 and separately whether the deployment answered: **online**, **unreachable**, or
 **no answer yet**. The two are kept apart because a deployment can be up while
-its key says nothing, and can verify while being down.
+its key proves nothing, and can verify while being down.
 
 Liveness uses a `no-cors` request, which resolves whenever something answers and
 rejects only on a connection failure. A timeout is reported as *no answer yet*
 rather than unreachable — a healthy deployment that simply does not allow this
 origin must not be labelled down.
 
-## Publishing the ownership record
+## Publishing the proof
 
-At the instance's hostname, prefixed with an underscore label so it cannot
-collide with a host of the same name:
+If you already have a Keyoxide DNS proof for the domain your deployment runs
+under, there is nothing to publish: that is what the directory reads. Otherwise
+it is Keyoxide's ordinary DNS proof, useful everywhere Keyoxide is, and not
+something this directory invented:
 
 ```
-_keyoxide-directory.kx.example.org.  IN  TXT  "openpgp4fpr:3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11"
+proof@ariadne.id=dns:example.org?type=TXT   # on your key's user id
+example.org.  IN  TXT  "openpgp4fpr:3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11"
 ```
 
-The `openpgp4fpr:` syntax is Keyoxide's own. Several records are allowed and any
-one of them matching confirms the key, so rotating a key or running a deployment
-with someone else needs no flag day. A TXT record under this name that is not a
-fingerprint URI is ignored rather than read as a competing claim.
+Several records are allowed and any one of them matching confirms the key, so
+rotating a key or running a deployment with someone else needs no flag day. A TXT
+record under the name that names no fingerprint is ignored rather than read as a
+competing claim — which covers the `NAME@DOMAIN` record form Keyoxide also
+allows, carrying an address this directory neither has nor wants.
+
+The record is matched the way doipjs matches it, on the URI appearing anywhere in
+the record rather than at its start. A record Keyoxide already accepts has to
+verify here too, or reusing an existing proof would not reuse much.
 
 ## Where keys are fetched from
 
@@ -124,8 +156,8 @@ or the shipped bundle is an address. `npm run wkd-hash <address>` computes it
 locally and sends nothing anywhere.
 
 Checking ownership means the page also asks a DNS-over-HTTPS resolver about each
-listed instance, which is a third party it did not previously contact. What that
-resolver learns is the hostnames of entries already published in this repository,
+proven domain, which is a third party it did not previously contact. What that
+resolver learns is the domains named by proofs already published on public keys,
 not anything about the visitor beyond their having opened the directory. It is
 still a party in the loop, and worth knowing about.
 
@@ -144,6 +176,7 @@ $ npm run test:unit      # Vitest: library and component tests
 $ npm run test:e2e       # Playwright, against the production build
 $ npm run test:entries   # resolve every listed entry against the real network
 $ npm run validate:keys  # schema-check src/data/keys.json
+$ npm run verify:entries # check each entry's signature against its own key
 $ npm run wkd-hash <addr> # print the wkd entry for an address
 $ npm run check          # svelte-check
 $ npm run build          # -> dist/
@@ -156,18 +189,26 @@ jsdom with the browser export condition Svelte needs.
 
 Key fixtures under `tests/fixtures/keys` are real keys generated with gpg in a
 throwaway keyring, so the parser is tested against packets GnuPG actually emits.
-Their user ids use `@example.invalid` addresses. `claimed.gpg` is `claimed.asc`
-run through `gpg --dearmor`: the same key in the unarmored form WKD serves.
+Their user ids use `@example.invalid` addresses. `proof.gpg` is `proof.asc` run
+through `gpg --dearmor`: the same key in the unarmored form WKD serves, and
+`proof.entry-sig.b64` is a real `gpg --detach-sign` over that key's entry.
+
+`proofs.asc` is the one that earns its keep. It carries two `proof@ariadne.id`
+dns proofs, a third `proof@ariadne.id` that is a Mastodon URL, a legacy
+`proof@metacode.biz` proof, and a second user id with no notations at all.
+openpgp.js's `notations` map is keyed by notation name and so keeps only the last
+subpacket parsed under each — against this key it reports the Mastodon URL and
+loses both dns proofs. That is why the parser reads `rawNotations` instead.
 
 The z-base-32 hashing is checked against the worked example published in
 draft-koch-openpgp-webkey-service, so the directory cannot drift into looking
 somewhere no other WKD client would.
 
-`validate:keys` proves an entry is well-formed; `test:entries` proves it is
-*true*. It loads the production build in a real browser with no stubbing and
+`validate:keys` proves an entry is well-formed, `verify:entries` proves the
+operator asked for it, and `test:entries` proves it is *true*. It loads the production build in a real browser with no stubbing and
 checks that every entry in `keys.json` reaches **verified** — so a typo'd hash, a
 key that was never published, a domain that stopped sending CORS headers, or a
-notation edited to point elsewhere all fail there rather than on the live site.
+proof withdrawn from a key all fail there rather than on the live site.
 It is the one suite that touches the network, which is why it is kept out of CI's
 default path: it gates changes to `keys.json` and runs daily, so an operator's
 outage cannot fail unrelated pull requests. Running against the real bundle also

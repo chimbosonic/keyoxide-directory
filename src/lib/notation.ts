@@ -13,14 +13,6 @@
 export const PROOF_NOTATION_NAMES = ['proof@ariadne.id', 'proof@metacode.biz']
 
 /**
- * The directory's own notation, meaning "this is the deployment I run".
- *
- * Kept only until the proof route replaces it: it costs an operator a key edit
- * and a republish, which is the friction the proof route exists to remove.
- */
-export const NOTATION_NAME = 'instance@dp42.dev'
-
-/**
  * doipjs matches `dns:DOMAIN` with an optional query, and its own regex is
  * unanchored at the end. This one is anchored: a claim value that does not parse
  * whole is a malformed claim, and reading a domain out of its prefix would
