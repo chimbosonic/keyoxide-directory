@@ -5,7 +5,7 @@ browser. There is no backend: the page ships with a list of operator key
 identifiers, fetches each key, and reads the DNS proofs its operator already
 published to Keyoxide.
 
-**[Add your deployment](.github/pull_request_template.md)** — one entry in
+**[Add your deployment](.github/pull_request_template.md)**: one entry in
 `src/data/keys.json`.
 
 ## How verification works
@@ -19,7 +19,7 @@ key  ◀──  TXT "openpgp4fpr:<fingerprint>"           ──   domain
 
 Two limits worth stating plainly. Verification is by host, never by path: an
 instance at `https://example.org/keyoxide` is confirmed by a record on
-`example.org`. And it is not cryptographic — the record is read over
+`example.org`. And it is not cryptographic: the record is read over
 DNS-over-HTTPS, so it rests on believing the resolver.
 
 A proof says nothing about *wanting to be listed here*. So each entry also
@@ -28,8 +28,8 @@ checked at merge time by `verify:entries` and never by the page.
 
 ## Keyoxide.org
 
-keyoxide.org and dev.keyoxide.org are pinned rather than listed — the project has
-signed no entry, and would have no reason to — and are kept out of the verified
+keyoxide.org and dev.keyoxide.org are pinned rather than listed (the project has
+signed no entry, and would have no reason to) and are kept out of the verified
 count.
 
 ## Where keys are fetched from

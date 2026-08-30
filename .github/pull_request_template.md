@@ -7,7 +7,7 @@ request rather than rendering as a broken card.
 ## 1. Prove your domain to Keyoxide
 
 If you already have a Keyoxide DNS proof for the domain your deployment is served
-from, this step is done — the directory reads the proof you already published,
+from, this step is done: the directory reads the proof you already published,
 and there is nothing to add to your key.
 
 If you do not, it is Keyoxide's ordinary DNS proof, and it works everywhere
@@ -27,8 +27,7 @@ example.org.  IN  TXT  "openpgp4fpr:<YOUR-FINGERPRINT>"
 ```
 
 The value is your full 40-character fingerprint after `openpgp4fpr:`. Publishing
-it needs control of that domain's DNS, which is the thing an impersonator does
-not have. Check it before opening the pull request:
+it needs control of that domain's DNS. Check it before opening the pull request:
 
 ```console
 $ dig +short TXT example.org
@@ -41,7 +40,7 @@ The domain you prove has to cover your deployment's **host**. Proving
 proof on the host itself is the tightest fit, and your card says which domain
 confirmed it when the proof came from further up.
 
-Several records under one name are fine — any one matching confirms you, so
+Several records under one name are fine; any one matching confirms you, so
 rotating a key does not need a flag day.
 
 ## 2. Sign your entry
@@ -56,7 +55,7 @@ $ printf 'keyoxide-directory listing v1\ninstance=https://kx.example.org\n' \
 ```
 
 Put the output in the entry's `signature` field, which is required. Sign the
-instance URL exactly as you write it in the entry — a trailing slash added
+instance URL exactly as you write it in the entry; a trailing slash added
 afterwards invalidates it. `npm run verify:entries` checks this, and it is the
 one thing about your entry nobody else could have produced.
 
@@ -66,10 +65,6 @@ An entry lists every place its key can be fetched from, and you can declare all
 three. They are a fallback chain: the same key in several places, tried `dane`,
 then `wkd`, then `hkp`, whatever order you write them in. The first that answers
 settles it, and a route that has nothing to say does not sink the entry.
-
-Declaring more than one is worth doing. Each route fails in its own way — a zone
-that stops validating, a server that drops its CORS header, a keyserver outage —
-and they do not fail together.
 
 The finished entry looks like this:
 
@@ -88,7 +83,7 @@ The finished entry looks like this:
 Every source must be the same key. `npm run verify:entries` fetches all of them
 and fails if their fingerprints disagree.
 
-### `dane` — the key is an OPENPGPKEY record in your DNS
+### `dane` the key is an OPENPGPKEY record in your DNS
 
 The route that asks least of you: no web server, no CORS headers, nothing to keep
 running. Compute the record name:
@@ -128,7 +123,7 @@ $ curl -s -H 'accept: application/dns-json' \
 Note `type=61` rather than `type=OPENPGPKEY`: dns.google rejects the name with a
 400.
 
-### `wkd` — the key is in your domain's Web Key Directory
+### `wkd` the key is in your domain's Web Key Directory
 
 If you publish your own key over WKD, the directory can fetch it from you
 directly, with no keyserver in between. Your address is *not* stored: the source
@@ -143,16 +138,11 @@ $ npm run wkd-hash you@example.org
 }
 ```
 
-The address is only ever an argument to that local command — it is not sent
-anywhere, and is not what you commit.
-
 **Your server must send CORS headers.** The lookup runs in the visitor's browser,
 so your WKD host needs `access-control-allow-origin: *` on the
-`/.well-known/openpgpkey/` path. Without it the fetch is blocked. This is the
-single most common reason a `wkd` source goes quiet, and the reason `dane` is
-tried first.
+`/.well-known/openpgpkey/` path. Without it the fetch is blocked.
 
-### `hkp` — the key is on keys.openpgp.org
+### `hkp` the key is on keys.openpgp.org
 
 Publish it:
 
@@ -167,9 +157,7 @@ and name your fingerprint:
 ```
 
 `fingerprint` is a 40-character fingerprint or a 16-character long key id. Short
-key ids are rejected because they are collision-prone. This route needs nothing
-of you beyond the upload, which is why it is the last resort rather than the
-first choice: it is the one copy you do not serve.
+key ids are rejected because they are collision-prone.
 
 Neither hash is a secret, incidentally. Both are unsalted digests of your
 lowercased local part next to your domain in the clear, so they defeat address
@@ -204,6 +192,6 @@ Your card shows the deployment host, a short key id (the last 16 hex characters
 of your fingerprint) and two pills: whether the proof verified, and whether the
 deployment answered. Your user id and address are never rendered.
 
-If something is wrong the entry still appears, marked with what was wrong — a key
+If something is wrong the entry still appears, marked with what was wrong: a key
 proving only other domains, a key carrying no dns proof, a key that none of your
 sources could produce, or a domain that does not name your key back.
