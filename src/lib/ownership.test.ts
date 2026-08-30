@@ -119,6 +119,23 @@ describe('claimedFingerprints', () => {
     expect(claimedFingerprints([`${FINGERPRINT_URI}nonsense`])).toEqual([])
     expect(claimedFingerprints([`${FINGERPRINT_URI}${FPR.slice(0, 16)}`])).toEqual([])
   })
+
+  // doipjs matches a claim the record *contains*, so a record Keyoxide already
+  // accepts has to verify here too.
+  it('finds the uri anywhere in the record, as doipjs does', () => {
+    expect(claimedFingerprints([`keyoxide proof ${FINGERPRINT_URI}${FPR}`])).toEqual([FPR])
+    expect(claimedFingerprints([`${FINGERPRINT_URI}${FPR} (operator key)`])).toEqual([FPR])
+  })
+
+  it('reads several claims out of one record', () => {
+    expect(
+      claimedFingerprints([`${FINGERPRINT_URI}${FPR} ${FINGERPRINT_URI}${OTHER}`]),
+    ).toEqual([FPR, OTHER])
+  })
+
+  it('will not truncate a longer hex run into a fingerprint', () => {
+    expect(claimedFingerprints([`${FINGERPRINT_URI}${FPR}AB`])).toEqual([])
+  })
 })
 
 describe('fetchOwnershipRecords', () => {
@@ -126,7 +143,7 @@ describe('fetchOwnershipRecords', () => {
     const fetchImpl = vi.fn(async (_input: FetchInput) =>
       answering(`"${FINGERPRINT_URI}${FPR}"`),
     )
-    const result = await fetchOwnershipRecords('https://keyoxide.dp42.dev', { fetch: fetchImpl })
+    const result = await fetchOwnershipRecords(NAME, { fetch: fetchImpl })
 
     expect(result).toEqual({ status: 'ok', records: [`${FINGERPRINT_URI}${FPR}`] })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
@@ -135,7 +152,7 @@ describe('fetchOwnershipRecords', () => {
 
   it('reports no records for a name that publishes none, without asking again', async () => {
     const fetchImpl = vi.fn(async (_input: FetchInput) => json(NODATA))
-    const result = await fetchOwnershipRecords('https://keyoxide.dp42.dev', { fetch: fetchImpl })
+    const result = await fetchOwnershipRecords(NAME, { fetch: fetchImpl })
 
     // "Nothing published" is an answer. Asking the second resolver would only
     // put the same question to a different server.
@@ -153,7 +170,7 @@ describe('fetchOwnershipRecords', () => {
         ],
       }),
     )
-    const result = await fetchOwnershipRecords('https://kx.example.org', { fetch: fetchImpl })
+    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
 
     expect(result).toEqual({ status: 'ok', records: [`${FINGERPRINT_URI}${FPR}`] })
   })
@@ -163,7 +180,7 @@ describe('fetchOwnershipRecords', () => {
       if (String(input).includes('dns.google')) throw new TypeError('Failed to fetch')
       return answering(`"${FINGERPRINT_URI}${FPR}"`)
     })
-    const result = await fetchOwnershipRecords('https://kx.example.org', { fetch: fetchImpl })
+    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
 
     expect(result).toMatchObject({ status: 'ok' })
     expect(fetchImpl).toHaveBeenCalledTimes(2)
@@ -175,7 +192,7 @@ describe('fetchOwnershipRecords', () => {
         ? json({}, 502)
         : answering(`"${FINGERPRINT_URI}${FPR}"`),
     )
-    const result = await fetchOwnershipRecords('https://kx.example.org', { fetch: fetchImpl })
+    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
 
     expect(result).toMatchObject({ status: 'ok' })
   })
@@ -184,23 +201,15 @@ describe('fetchOwnershipRecords', () => {
     const fetchImpl = vi.fn(async (_input: FetchInput) => {
       throw new TypeError('Failed to fetch')
     })
-    const result = await fetchOwnershipRecords('https://kx.example.org', { fetch: fetchImpl })
+    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
 
     expect(result).toEqual({ status: 'lookup-error', reason: 'Failed to fetch' })
     expect(fetchImpl).toHaveBeenCalledTimes(RESOLVERS.length)
   })
 
-  it('reports a lookup error for an unparseable instance without any request', async () => {
-    const fetchImpl = vi.fn(async (_input: FetchInput) => answering())
-    const result = await fetchOwnershipRecords('not a url', { fetch: fetchImpl })
-
-    expect(result).toMatchObject({ status: 'lookup-error' })
-    expect(fetchImpl).not.toHaveBeenCalled()
-  })
-
   it('reports a lookup error when a resolver returns something that is not json', async () => {
     const fetchImpl = vi.fn(async (_input: FetchInput) => new Response('<html>', { status: 200 }))
-    const result = await fetchOwnershipRecords('https://kx.example.org', { fetch: fetchImpl })
+    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
 
     expect(result).toMatchObject({ status: 'lookup-error' })
   })

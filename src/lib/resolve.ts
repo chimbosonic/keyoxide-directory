@@ -1,5 +1,5 @@
 import { fetchKey, type FetchOptions } from './keyserver'
-import { claimedFingerprints, fetchOwnershipRecords } from './ownership'
+import { claimedFingerprints, fetchOwnershipRecords, recordName } from './ownership'
 import { parseKey, type KeyMaterial } from './parseKey'
 import { isHkpEntry, type KeyEntry } from './validateKeys'
 import { fetchWkdKey } from './wkd'
@@ -149,7 +149,12 @@ export async function resolveEntry(
     claimedInstance: instanceUrl,
   }
 
-  const records = await fetchOwnershipRecords(entry.instance, { fetch: options.fetch })
+  const name = recordName(entry.instance)
+  if (name === null) {
+    return { ...claimed, status: 'dns-error', reason: `not a url: ${entry.instance}` }
+  }
+
+  const records = await fetchOwnershipRecords(name, { fetch: options.fetch })
   if (records.status === 'lookup-error') {
     return { ...claimed, status: 'dns-error', reason: records.reason }
   }

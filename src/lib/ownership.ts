@@ -66,26 +66,29 @@ export function parseTxtData(data: string): string {
 /**
  * The fingerprints a set of records names, uppercased.
  *
- * Records that are not fingerprint URIs are ignored rather than counted as a
- * competing claim — a stray TXT under this name means the deployment has said
- * nothing, not that it has named someone else.
+ * The URI is looked for anywhere in the record rather than only at its start,
+ * because that is what doipjs does: it matches a claim the record *contains*. A
+ * record Keyoxide accepts has to verify here too, or reusing an operator's
+ * existing proof would not actually reuse it.
+ *
+ * Records that name no fingerprint are ignored rather than counted as a
+ * competing claim — a stray TXT under this name means the domain has said
+ * nothing, not that it has named someone else. That covers the `NAME@DOMAIN`
+ * record form Keyoxide also allows, which carries an address this directory
+ * neither has nor wants.
  */
 export function claimedFingerprints(records: readonly string[]): string[] {
-  const found: string[] = []
+  // Constructed per call: a shared /g regex carries lastIndex between callers.
+  // The trailing guard stops a longer hex run being truncated into a match.
+  const pattern = new RegExp(`${FINGERPRINT_URI}([0-9a-f]{40})(?![0-9a-f])`, 'gi')
 
-  for (const record of records) {
-    const value = record.trim()
-    if (!value.toLowerCase().startsWith(FINGERPRINT_URI)) continue
-
-    const fingerprint = value.slice(FINGERPRINT_URI.length).trim().toUpperCase()
-    if (/^[0-9A-F]{40}$/.test(fingerprint)) found.push(fingerprint)
-  }
-
-  return found
+  return records.flatMap((record) =>
+    [...record.matchAll(pattern)].map(([, fingerprint]) => (fingerprint as string).toUpperCase()),
+  )
 }
 
 export type OwnershipResult =
-  /** The lookup succeeded. `records` is empty when the deployment publishes none. */
+  /** The lookup succeeded. `records` is empty when the domain publishes none. */
   | { status: 'ok'; records: string[] }
   | { status: 'lookup-error'; reason: string }
 
@@ -100,22 +103,19 @@ interface DohAnswer {
 }
 
 /**
- * Reads the ownership records for a deployment.
+ * Reads the TXT records published at a DNS name.
  *
  * A resolver answering "there is no such record" is an answer, and ends the
  * lookup: falling through to the second resolver would only ask the same
  * question again. Only an unreachable resolver is retried. This is the same
  * distinction `fetchWkdKey` draws between not-found and fetch-error, and it
- * matters as much here — a deployment that publishes nothing and a resolver we
+ * matters as much here — a domain that publishes nothing and a resolver we
  * could not reach mean very different things on the card.
  */
 export async function fetchOwnershipRecords(
-  instance: string,
+  name: string,
   options: OwnershipOptions = {},
 ): Promise<OwnershipResult> {
-  const name = recordName(instance)
-  if (name === null) return { status: 'lookup-error', reason: `not a url: ${instance}` }
-
   const doFetch = options.fetch ?? globalThis.fetch
   const resolvers = options.resolvers ?? RESOLVERS
   let lastError = 'no resolver answered'
