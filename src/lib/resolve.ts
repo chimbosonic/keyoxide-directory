@@ -1,11 +1,18 @@
 import { fetchKey, type FetchOptions } from './keyserver'
+import { claimedFingerprints, fetchOwnershipRecords } from './ownership'
 import { parseKey, type KeyMaterial } from './parseKey'
 import { isHkpEntry, type KeyEntry } from './validateKeys'
 import { fetchWkdKey } from './wkd'
 
 export type ResolvedStatus =
-  /** The key carries the notation and it matches what the entry declares. */
+  /** The key claims the deployment, and the deployment names the key. */
   | 'verified'
+  /** The key's claim matches, but the deployment publishes no record naming it. */
+  | 'unconfirmed'
+  /** The deployment names a key, and it is not this one. */
+  | 'contested'
+  /** No resolver could be reached, so ownership could not be checked either way. */
+  | 'dns-error'
   /** The key carries a notation, but for a different deployment. */
   | 'mismatch'
   /** The key was fetched, but claims no deployment. */
@@ -133,7 +140,38 @@ export async function resolveEntry(
     }
   }
 
-  return { ...base, fingerprint, claimedInstance: instanceUrl, status: 'verified' }
+  // The key's half is settled; now ask the deployment. Only reached once the
+  // claim itself holds up, so the statuses stay disjoint and no entry that has
+  // already failed costs a DNS query.
+  const claimed: Omit<ResolvedInstance, 'status'> = {
+    ...base,
+    fingerprint,
+    claimedInstance: instanceUrl,
+  }
+
+  const records = await fetchOwnershipRecords(entry.instance, { fetch: options.fetch })
+  if (records.status === 'lookup-error') {
+    return { ...claimed, status: 'dns-error', reason: records.reason }
+  }
+
+  const owners = claimedFingerprints(records.records)
+  if (owners.length === 0) {
+    return {
+      ...claimed,
+      status: 'unconfirmed',
+      reason: 'the deployment publishes no record naming a key',
+    }
+  }
+
+  if (!owners.includes(fingerprint.toUpperCase())) {
+    return {
+      ...claimed,
+      status: 'contested',
+      reason: 'the deployment names a different key',
+    }
+  }
+
+  return { ...claimed, status: 'verified' }
 }
 
 /** Resolves every entry concurrently; one failure never blocks the rest. */

@@ -28,10 +28,35 @@ const wkdEntry = (instance: string): KeyEntry => ({
 const binaryFixture = (name: string) =>
   new Uint8Array(readFileSync(resolvePath(__dirname, '../../tests/fixtures/keys', `${name}.gpg`)))
 
-const serving = (body: string, status = 200) => vi.fn(async () => new Response(body, { status }))
-
 /** fetch is overloaded and takes more than a string, so mocks must match its signature. */
 type FetchInput = Parameters<typeof globalThis.fetch>[0]
+
+const DOH = /dns\.google|cloudflare-dns\.com/
+
+const ownershipAnswer = (...fingerprints: string[]) =>
+  new Response(
+    JSON.stringify({
+      Status: 0,
+      Answer: fingerprints.map((fingerprint) => ({
+        type: 16,
+        data: `"openpgp4fpr:${fingerprint}"`,
+      })),
+    }),
+    { status: 200 },
+  )
+
+/**
+ * Routes a request the way the two halves of a claim are really fetched: the key
+ * from a keyserver or a WKD host, the ownership record from a DoH resolver. The
+ * default owner is the fixture's own key, so an entry that claims correctly
+ * verifies.
+ */
+const serve = (
+  key: () => Response,
+  owner: () => Response = () => ownershipAnswer(CLAIMED_FPR),
+) => vi.fn(async (input: FetchInput) => (DOH.test(String(input)) ? owner() : key()))
+
+const serving = (body: string, status = 200) => serve(() => new Response(body, { status }))
 
 describe('normalizeInstanceUrl', () => {
   it('strips a trailing slash', () => {
@@ -134,10 +159,77 @@ describe('resolveEntry', () => {
     expect(result.status).toBe('unreadable')
   })
 
+  it('does not verify a key the deployment says nothing about', async () => {
+    // The impersonation case: the notation matches the entry perfectly, because
+    // both halves were written by whoever holds the key. Only the deployment can
+    // settle it, and here it has not.
+    const result = await resolveEntry(entry('https://kx.example.org'), {
+      fetch: serve(
+        () => new Response(fixture('claimed')),
+        () => new Response(JSON.stringify({ Status: 0 }), { status: 200 }),
+      ),
+    })
+
+    expect(result.status).toBe('unconfirmed')
+    expect(result.fingerprint).toBe(CLAIMED_FPR)
+    expect(result.claimedInstance).toBe('https://kx.example.org')
+  })
+
+  it('flags a deployment that names a different key', async () => {
+    const result = await resolveEntry(entry('https://kx.example.org'), {
+      fetch: serve(
+        () => new Response(fixture('claimed')),
+        () => ownershipAnswer(PLAIN_FPR),
+      ),
+    })
+
+    expect(result.status).toBe('contested')
+  })
+
+  it('verifies when the deployment names this key among several', async () => {
+    const result = await resolveEntry(entry('https://kx.example.org'), {
+      fetch: serve(
+        () => new Response(fixture('claimed')),
+        () => ownershipAnswer(PLAIN_FPR, CLAIMED_FPR),
+      ),
+    })
+
+    expect(result.status).toBe('verified')
+  })
+
+  it('accepts a record whose hex is lower case', async () => {
+    const result = await resolveEntry(entry('https://kx.example.org'), {
+      fetch: serve(
+        () => new Response(fixture('claimed')),
+        () => ownershipAnswer(CLAIMED_FPR.toLowerCase()),
+      ),
+    })
+
+    expect(result.status).toBe('verified')
+  })
+
+  it('treats an unreachable resolver as unknown, not as a failed claim', async () => {
+    const result = await resolveEntry(entry('https://kx.example.org'), {
+      fetch: vi.fn(async (input: FetchInput) => {
+        if (DOH.test(String(input))) throw new TypeError('Failed to fetch')
+        return new Response(fixture('claimed'))
+      }),
+    })
+
+    expect(result.status).toBe('dns-error')
+  })
+
+  it('does not ask about ownership for a claim that already failed', async () => {
+    // A key claiming somewhere else is settled without a resolver being troubled.
+    const fetchImpl = serve(() => new Response(fixture('claimed')))
+    await resolveEntry(entry('https://other.example.org'), { fetch: fetchImpl })
+
+    const requested = fetchImpl.mock.calls.map(([input]) => String(input))
+    expect(requested.some((url) => DOH.test(url))).toBe(false)
+  })
+
   it('resolves a wkd entry from its domain, not the keyserver', async () => {
-    const fetchImpl = vi.fn(async (_input: FetchInput) =>
-      new Response(binaryFixture('claimed'), { status: 200 }),
-    )
+    const fetchImpl = serve(() => new Response(binaryFixture('claimed'), { status: 200 }))
     const result = await resolveEntry(wkdEntry('https://kx.example.org'), { fetch: fetchImpl })
 
     expect(result.status).toBe('verified')
@@ -151,15 +243,18 @@ describe('resolveEntry', () => {
   })
 
   it('falls back from the advanced wkd url to the direct one', async () => {
-    const fetchImpl = vi.fn(async (input: FetchInput) =>
-      String(input).startsWith('https://openpgpkey.')
+    const fetchImpl = vi.fn(async (input: FetchInput) => {
+      const url = String(input)
+      if (DOH.test(url)) return ownershipAnswer(CLAIMED_FPR)
+      return url.startsWith('https://openpgpkey.')
         ? new Response('', { status: 404 })
-        : new Response(binaryFixture('claimed'), { status: 200 }),
-    )
+        : new Response(binaryFixture('claimed'), { status: 200 })
+    })
     const result = await resolveEntry(wkdEntry('https://kx.example.org'), { fetch: fetchImpl })
 
     expect(result.status).toBe('verified')
-    expect(fetchImpl).toHaveBeenCalledTimes(2)
+    // Both WKD urls, then the resolver.
+    expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
 
   it('reports a wkd entry with no key published as not-found, naming the domain', async () => {
@@ -186,11 +281,22 @@ describe('resolveEntry', () => {
 
   it('classifies a wkd key claiming a different deployment as a mismatch', async () => {
     const result = await resolveEntry(wkdEntry('https://other.example.org'), {
-      fetch: vi.fn(async () => new Response(binaryFixture('claimed'), { status: 200 })),
+      fetch: serve(() => new Response(binaryFixture('claimed'), { status: 200 })),
     })
 
     expect(result.status).toBe('mismatch')
     expect(result.claimedInstance).toBe('https://kx.example.org')
+  })
+
+  it('looks the ownership record up under the declared instance host', async () => {
+    const fetchImpl = serve(() => new Response(fixture('claimed')))
+    await resolveEntry(entry('https://kx.example.org'), { fetch: fetchImpl })
+
+    const resolverCall = fetchImpl.mock.calls
+      .map(([input]) => String(input))
+      .find((url) => DOH.test(url))
+
+    expect(resolverCall).toContain(encodeURIComponent('_keyoxide-directory.kx.example.org'))
   })
 
   it('carries the declared instance through every failure state', async () => {
@@ -214,7 +320,8 @@ describe('resolveAll', () => {
 
     let call = 0
     const order = ['https://kx.example.org', 'https://plain.example.org', 'missing']
-    const fetchImpl = vi.fn(async () => {
+    const fetchImpl = vi.fn(async (input: FetchInput) => {
+      if (DOH.test(String(input))) return ownershipAnswer(CLAIMED_FPR)
       const key = order[call++]
       const body = bodies.get(key ?? '')
       return body ? new Response(body) : new Response('', { status: 404 })

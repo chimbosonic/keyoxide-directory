@@ -11,6 +11,9 @@
   const LABELS: Record<CardStatus, string> = {
     project: 'project instance',
     verified: 'verified',
+    unconfirmed: 'deployment does not confirm',
+    contested: 'deployment names another key',
+    'dns-error': 'confirmation lookup failed',
     mismatch: 'claims another deployment',
     'no-notation': 'no claim on key',
     'not-found': 'key not found',

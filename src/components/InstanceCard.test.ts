@@ -131,6 +131,18 @@ describe('InstanceCard', () => {
     expect(screen.getByTestId('verification')).toHaveTextContent('lookup failed')
   })
 
+  it.each([
+    ['unconfirmed', 'deployment does not confirm'],
+    ['contested', 'deployment names another key'],
+    ['dns-error', 'confirmation lookup failed'],
+  ] as const)('labels the %s state without calling it verified', (status, label) => {
+    const { container } = render(InstanceCard, { instance: resolved({ status }) })
+
+    expect(screen.getByTestId('verification')).toHaveTextContent(label)
+    expect(container.querySelector('.dot.ok')).toBeNull()
+    expect(container.querySelector('.dot.warn')).not.toBeNull()
+  })
+
   it('does not restate a no-notation key underneath the pill', () => {
     render(InstanceCard, {
       instance: resolved({

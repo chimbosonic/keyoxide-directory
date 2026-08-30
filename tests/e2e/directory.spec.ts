@@ -16,6 +16,28 @@ const MISSING = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'
  * everything below the network — the real bundle, OpenPGP.js, the notation read
  * and the status classification — runs for real.
  */
+/**
+ * The ownership record each deployment publishes. Stubbed like everything else so
+ * the suite stays offline; the value is the syntax a real resolver returns.
+ */
+async function stubResolvers(page: Page, owners: Record<string, string>) {
+  await page.route(/dns\.google|cloudflare-dns\.com/, (route) => {
+    const name = new URL(route.request().url()).searchParams.get('name') ?? ''
+    const host = name.replace('_keyoxide-directory.', '')
+    const owner = owners[host]
+
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/dns-json',
+      body: JSON.stringify(
+        owner === undefined
+          ? { Status: 0 }
+          : { Status: 0, Answer: [{ type: 16, data: `"openpgp4fpr:${owner}"` }] },
+      ),
+    })
+  })
+}
+
 async function stubKeyserver(page: Page) {
   await page.route('**/keys.openpgp.org/**', async (route) => {
     const url = route.request().url()
@@ -52,8 +74,16 @@ async function stubDeployments(page: Page) {
   await page.route('**/gone.example.org/**', (route) => route.abort('connectionrefused'))
 }
 
-async function loadDirectory(page: Page, entries: unknown[] = ENTRIES) {
+/** Only kx.example.org confirms, and it confirms the key that claims it. */
+const OWNERS: Record<string, string> = { 'kx.example.org': CLAIMED }
+
+async function loadDirectory(
+  page: Page,
+  entries: unknown[] = ENTRIES,
+  owners: Record<string, string> = OWNERS,
+) {
   await stubKeyserver(page)
+  await stubResolvers(page, owners)
   await stubDeployments(page)
   await page.addInitScript((seed) => {
     ;(window as unknown as Record<string, unknown>)['__KEYOXIDE_DIRECTORY_ENTRIES__'] = seed
@@ -118,6 +148,27 @@ test.describe('directory', () => {
     await expect(card.getByTestId('verification')).toContainText('verified')
     await expect(card.getByTestId('key-id')).toHaveText('0x3D15 0A48 04FD AB79')
     await expect(card.getByRole('link')).toHaveAttribute('href', 'https://kx.example.org')
+  })
+
+  test('refuses to verify a key the deployment says nothing about', async ({ page }) => {
+    // The impersonation case, end to end: a key whose notation names a deployment
+    // it does not run. Both halves of the claim agree, because one party wrote
+    // both. Without a record from the deployment it must not read as verified.
+    await loadDirectory(page, ENTRIES, {})
+
+    await expect(page.locator('[data-status="verified"]')).toHaveCount(0)
+    const card = page.locator('[data-status="unconfirmed"]')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('verification')).toContainText('deployment does not confirm')
+    await expect(page.getByTestId('summary')).toHaveText(`0 of ${ENTRIES.length} verified`)
+  })
+
+  test('flags a deployment that names a different key', async ({ page }) => {
+    await loadDirectory(page, ENTRIES, { 'kx.example.org': PLAIN })
+
+    const card = page.locator('[data-status="contested"]')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('verification')).toContainText('deployment names another key')
   })
 
   test('flags a key that claims a different deployment', async ({ page }) => {
