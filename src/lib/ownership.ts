@@ -20,26 +20,14 @@
  * `https://example.org/keyoxide` is confirmed by a record on `example.org`, and
  * a proof cannot say anything narrower than the host it names.
  *
- * The record is read over DNS-over-HTTPS because that is the only way a page
- * with no backend can read DNS at all. Both resolvers below answer with
- * `access-control-allow-origin: *`. The trust here is not cryptographic: we
- * believe what the resolver tells us, and the DNSSEC `AD` flag in its reply is
- * its own claim rather than something we verify.
+ * The record is read over DNS-over-HTTPS, in `./doh`, because that is the only
+ * way a page with no backend can read DNS at all. The trust it carries is not
+ * cryptographic, and the caveat is written up there.
  */
+import { TXT, queryDoh, type DohOptions } from './doh'
 
 /** Keyoxide's own fingerprint URI syntax, reused rather than invented. */
 export const FINGERPRINT_URI = 'openpgp4fpr:'
-
-/** Tried in order. The second is a fallback for the first being unreachable. */
-export const RESOLVERS = [
-  'https://dns.google/resolve',
-  'https://cloudflare-dns.com/dns-query',
-]
-
-export function dohUrls(name: string, resolvers: readonly string[] = RESOLVERS): string[] {
-  const query = `name=${encodeURIComponent(name)}&type=TXT`
-  return resolvers.map((resolver) => `${resolver}?${query}`)
-}
 
 /**
  * Unwraps a TXT record as DoH reports it: quoted, and split into several quoted
@@ -80,66 +68,25 @@ export type OwnershipResult =
   | { status: 'ok'; records: string[] }
   | { status: 'lookup-error'; reason: string }
 
-export interface OwnershipOptions {
-  fetch?: typeof globalThis.fetch | undefined
-  resolvers?: readonly string[] | undefined
-}
-
-interface DohAnswer {
-  type?: number
-  data?: string
-}
-
 /**
  * Reads the TXT records published at a DNS name.
  *
- * A resolver answering "there is no such record" is an answer, and ends the
- * lookup: falling through to the second resolver would only ask the same
- * question again. Only an unreachable resolver is retried. This is the same
- * distinction `fetchWkdKey` draws between not-found and fetch-error, and it
- * matters as much here — a domain that publishes nothing and a resolver we
- * could not reach mean very different things on the card.
+ * The `AD` flag the resolver returns is deliberately dropped here. An ownership
+ * record only ever confirms a key fetched from somewhere else, so an unsigned
+ * zone weakens it without breaking the pair; `fetchDaneKey`, where the record
+ * *is* the key, does insist on it.
  */
 export async function fetchOwnershipRecords(
   name: string,
-  options: OwnershipOptions = {},
+  options: DohOptions = {},
 ): Promise<OwnershipResult> {
-  const doFetch = options.fetch ?? globalThis.fetch
-  const resolvers = options.resolvers ?? RESOLVERS
-  let lastError = 'no resolver answered'
+  const answer = await queryDoh(name, TXT, options)
+  if (answer.status === 'lookup-error') return answer
 
-  for (const url of dohUrls(name, resolvers)) {
-    let response: Response
-    try {
-      response = await doFetch(url, { headers: { Accept: 'application/dns-json' } })
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
-      continue
-    }
-
-    if (!response.ok) {
-      lastError = `resolver responded ${response.status}`
-      continue
-    }
-
-    let body: { Answer?: DohAnswer[] }
-    try {
-      body = (await response.json()) as { Answer?: DohAnswer[] }
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error)
-      continue
-    }
-
-    // No Answer section at all is how both resolvers report "nothing published",
-    // whether the name is absent or merely carries no TXT.
-    const answers = body.Answer ?? []
-    return {
-      status: 'ok',
-      records: answers
-        .filter((answer) => answer.type === 16 && typeof answer.data === 'string')
-        .map((answer) => parseTxtData(answer.data as string)),
-    }
+  return {
+    status: 'ok',
+    records: answer.answers
+      .filter((record) => record.type === TXT && typeof record.data === 'string')
+      .map((record) => parseTxtData(record.data as string)),
   }
-
-  return { status: 'lookup-error', reason: lastError }
 }

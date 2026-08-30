@@ -1,8 +1,6 @@
 import {
   FINGERPRINT_URI,
-  RESOLVERS,
   claimedFingerprints,
-  dohUrls,
   fetchOwnershipRecords,
   parseTxtData,
 } from './ownership'
@@ -33,20 +31,6 @@ const NODATA = {
   Question: [{ name: `${NAME}.`, type: 16 }],
   Authority: [{ name: 'dp42.dev.', type: 6, TTL: 1800, data: 'peaches.ns.cloudflare.com. ...' }],
 }
-
-describe('dohUrls', () => {
-  it('queries every resolver for the same TXT name', () => {
-    const urls = dohUrls(NAME)
-
-    expect(urls).toHaveLength(RESOLVERS.length)
-    for (const url of urls) expect(url).toContain(`name=${encodeURIComponent(NAME)}&type=TXT`)
-    expect(urls[0]).toContain('dns.google')
-  })
-
-  it('percent-encodes the underscore-prefixed name', () => {
-    expect(dohUrls(NAME)[0]).toContain(encodeURIComponent(NAME))
-  })
-})
 
 describe('parseTxtData', () => {
   it('unwraps the quotes a resolver puts around a record', () => {
@@ -151,39 +135,9 @@ describe('fetchOwnershipRecords', () => {
     expect(result).toEqual({ status: 'ok', records: [`${FINGERPRINT_URI}${FPR}`] })
   })
 
-  it('falls back to the second resolver when the first cannot be reached', async () => {
-    const fetchImpl = vi.fn(async (input: FetchInput) => {
-      if (String(input).includes('dns.google')) throw new TypeError('Failed to fetch')
-      return answering(`"${FINGERPRINT_URI}${FPR}"`)
-    })
-    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
-
-    expect(result).toMatchObject({ status: 'ok' })
-    expect(fetchImpl).toHaveBeenCalledTimes(2)
-  })
-
-  it('falls back when the first resolver errors', async () => {
-    const fetchImpl = vi.fn(async (input: FetchInput) =>
-      String(input).includes('dns.google')
-        ? json({}, 502)
-        : answering(`"${FINGERPRINT_URI}${FPR}"`),
-    )
-    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
-
-    expect(result).toMatchObject({ status: 'ok' })
-  })
-
-  it('reports a lookup error when no resolver can be reached', async () => {
-    const fetchImpl = vi.fn(async (_input: FetchInput) => {
-      throw new TypeError('Failed to fetch')
-    })
-    const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
-
-    expect(result).toEqual({ status: 'lookup-error', reason: 'Failed to fetch' })
-    expect(fetchImpl).toHaveBeenCalledTimes(RESOLVERS.length)
-  })
-
-  it('reports a lookup error when a resolver returns something that is not json', async () => {
+  it('passes a lookup error through rather than reporting no records', async () => {
+    // The distinction the card rests on: a domain that publishes nothing and a
+    // resolver that could not be reached mean very different things.
     const fetchImpl = vi.fn(async (_input: FetchInput) => new Response('<html>', { status: 200 }))
     const result = await fetchOwnershipRecords('kx.example.org', { fetch: fetchImpl })
 
