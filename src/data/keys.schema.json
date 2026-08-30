@@ -24,6 +24,11 @@
       "format": "uri",
       "pattern": "^https://"
     },
+    "signature": {
+      "type": "string",
+      "description": "Base64 of a detached OpenPGP signature by this key over \"keyoxide-directory listing v1\\ninstance=<instance>\\n\". Checked by `npm run verify:entries`, never by the page.",
+      "pattern": "^[A-Za-z0-9+/]+={0,2}$"
+    },
     "hkpEntry": {
       "type": "object",
       "description": "A key looked up on keys.openpgp.org by fingerprint.",
@@ -36,7 +41,8 @@
           "description": "Long key id (16 hex) or full fingerprint (40 hex). Short key ids are rejected as collision-prone.",
           "pattern": "^([0-9A-Fa-f]{16}|[0-9A-Fa-f]{40})$"
         },
-        "instance": { "$ref": "#/$defs/instance" }
+        "instance": { "$ref": "#/$defs/instance" },
+        "signature": { "$ref": "#/$defs/signature" }
       }
     },
     "wkdEntry": {
@@ -56,7 +62,8 @@
           "description": "The z-base-32 SHA-1 of the lowercased local part. Compute it with `npm run wkd-hash <address>`.",
           "pattern": "^[ybndrfg8ejkmcpqxot1uwisza345h769]{32}$"
         },
-        "instance": { "$ref": "#/$defs/instance" }
+        "instance": { "$ref": "#/$defs/instance" },
+        "signature": { "$ref": "#/$defs/signature" }
       }
     },
     "entry": {

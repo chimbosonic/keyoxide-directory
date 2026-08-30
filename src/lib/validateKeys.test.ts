@@ -39,6 +39,19 @@ describe('validateKeysFile', () => {
     expect(validateKeysFile(schema, file(wkd()))).toEqual({ valid: true, errors: [] })
   })
 
+  it('accepts an entry carrying a signature', () => {
+    const signature = 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA=='
+    expect(validateKeysFile(schema, file(hkp({ signature }))).valid).toBe(true)
+    expect(validateKeysFile(schema, file(wkd({ signature }))).valid).toBe(true)
+  })
+
+  it('rejects a signature that is not base64', () => {
+    const result = validateKeysFile(schema, file(hkp({ signature: 'not base64!' })))
+
+    expect(result.valid).toBe(false)
+    expect(result.errors.join(' ')).toContain('pattern')
+  })
+
   it('accepts an empty list', () => {
     expect(validateKeysFile(schema, file()).valid).toBe(true)
   })

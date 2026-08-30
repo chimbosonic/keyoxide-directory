@@ -32,6 +32,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+
+      # The consent gate: an entry has to be signed by the key it names. Fetches
+      # the same real keys test:entries does, so it belongs in this workflow.
+      - run: npm run verify:entries
+
       - run: npx playwright install --with-deps chromium
       - run: npm run test:entries
       - if: failure()
