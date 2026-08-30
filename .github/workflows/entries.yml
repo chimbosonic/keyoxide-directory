@@ -1,0 +1,42 @@
+name: Listed instances
+
+# Deliberately not part of the CI workflow. This job talks to real keyservers and
+# real operator domains, so an operator's server going down would otherwise fail
+# pull requests that have nothing to do with them.
+#
+# It gates changes to the directory itself, and runs daily to surface entries
+# that were fine when merged and have since drifted.
+on:
+  pull_request:
+    paths:
+      - 'src/data/keys.json'
+  push:
+    branches: [main]
+    paths:
+      - 'src/data/keys.json'
+  schedule:
+    - cron: '17 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resolve:
+    name: Resolve listed instances
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:entries
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: entries-traces
+          path: test-results/
+          retention-days: 7

@@ -100,6 +100,7 @@ $ npm ci
 $ npm run dev            # local dev server
 $ npm run test:unit      # Vitest: library and component tests
 $ npm run test:e2e       # Playwright, against the production build
+$ npm run test:entries   # resolve every listed entry against the real network
 $ npm run validate:keys  # schema-check src/data/keys.json
 $ npm run wkd-hash <addr> # print the wkd entry for an address
 $ npm run check          # svelte-check
@@ -119,6 +120,17 @@ run through `gpg --dearmor`: the same key in the unarmored form WKD serves.
 The z-base-32 hashing is checked against the worked example published in
 draft-koch-openpgp-webkey-service, so the directory cannot drift into looking
 somewhere no other WKD client would.
+
+`validate:keys` proves an entry is well-formed; `test:entries` proves it is
+*true*. It loads the production build in a real browser with no stubbing and
+checks that every entry in `keys.json` reaches **verified** — so a typo'd hash, a
+key that was never published, a domain that stopped sending CORS headers, or a
+notation edited to point elsewhere all fail there rather than on the live site.
+It is the one suite that touches the network, which is why it is kept out of CI's
+default path: it gates changes to `keys.json` and runs daily, so an operator's
+outage cannot fail unrelated pull requests. Running against the real bundle also
+means it exercises the `openpgp/lightweight` build visitors get, rather than the
+full node build the unit tests use.
 
 `dist/` is a flat static bundle — `index.html` plus hashed assets, relative
 `base`, no server-side routing — and is uploaded as-is to Cloudflare R2.
