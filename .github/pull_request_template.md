@@ -55,10 +55,10 @@ $ printf 'keyoxide-directory listing v1\ninstance=https://kx.example.org\n' \
     | gpg --detach-sign --local-user <YOUR-FINGERPRINT> | base64 -w0
 ```
 
-Put the output in the entry's `signature` field. Sign the instance URL exactly as
-you write it in the entry — a trailing slash added afterwards invalidates it.
-`npm run verify:entries` checks this, and it is the one thing about your entry
-nobody else could have produced.
+Put the output in the entry's `signature` field, which is required. Sign the
+instance URL exactly as you write it in the entry — a trailing slash added
+afterwards invalidates it. `npm run verify:entries` checks this, and it is the
+one thing about your entry nobody else could have produced.
 
 ## 3. Publish your key, and pick the lookup that matches
 

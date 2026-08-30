@@ -9,10 +9,14 @@ const INSTANCE = 'https://kx.example.org'
 /** Every character of the z-base-32 alphabet, which is exactly a hash's length. */
 const HASH = 'ybndrfg8ejkmcpqxot1uwisza345h769'
 
+/** Shaped like a real one; whether it verifies is verify:entries' question, not the schema's. */
+const SIGNATURE = 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA=='
+
 const hkp = (over: Record<string, unknown> = {}) => ({
   type: 'hkp',
   fingerprint: FPR,
   instance: INSTANCE,
+  signature: SIGNATURE,
   ...over,
 })
 
@@ -21,6 +25,7 @@ const wkd = (over: Record<string, unknown> = {}) => ({
   domain: 'example.net',
   hash: HASH,
   instance: INSTANCE,
+  signature: SIGNATURE,
   ...over,
 })
 
@@ -39,10 +44,16 @@ describe('validateKeysFile', () => {
     expect(validateKeysFile(schema, file(wkd()))).toEqual({ valid: true, errors: [] })
   })
 
-  it('accepts an entry carrying a signature', () => {
-    const signature = 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA=='
-    expect(validateKeysFile(schema, file(hkp({ signature }))).valid).toBe(true)
-    expect(validateKeysFile(schema, file(wkd({ signature }))).valid).toBe(true)
+  // The consent gate starts here: an unsigned entry never reaches the network
+  // check that would have told the operator's key from anyone else's.
+  it('rejects an entry carrying no signature', () => {
+    for (const entry of [hkp(), wkd()]) {
+      const { signature: _dropped, ...unsigned } = entry
+      const result = validateKeysFile(schema, file(unsigned))
+
+      expect(result.valid).toBe(false)
+      expect(result.errors.join(' ')).toContain('signature')
+    }
   })
 
   it('rejects a signature that is not base64', () => {

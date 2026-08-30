@@ -46,16 +46,14 @@ const keysFile = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', '
 const entries = (JSON.parse(readFileSync(keysFile, 'utf8')) as { keys: SignedEntry[] }).keys
 
 const failures: string[] = []
-let unsigned = 0
 
 for (const [index, entry] of entries.entries()) {
   const label = `keys/${index} (${entry.instance})`
 
-  // Until every listed entry carries one, an absent signature is reported rather
-  // than failed: the schema does not require the field yet.
+  // The schema requires the field, so reaching here without one means the file
+  // was hand-edited past validate:keys rather than that the operator forgot.
   if (entry.signature === undefined) {
-    console.warn(`? ${label}: no signature`)
-    unsigned += 1
+    failures.push(`${label}: no signature`)
     continue
   }
 
@@ -85,5 +83,5 @@ if (failures.length > 0) {
   process.exit(1)
 }
 
-const signed = entries.length - unsigned
-console.log(`\n${signed} of ${entries.length} entries carry a signature, and all of them verify.`)
+const noun = entries.length === 1 ? '1 entry verifies' : `all ${entries.length} entries verify`
+console.log(`\nSigned by the key it names: ${noun}.`)

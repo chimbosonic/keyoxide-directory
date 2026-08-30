@@ -26,14 +26,14 @@
     },
     "signature": {
       "type": "string",
-      "description": "Base64 of a detached OpenPGP signature by this key over \"keyoxide-directory listing v1\\ninstance=<instance>\\n\". Checked by `npm run verify:entries`, never by the page.",
+      "description": "Base64 of a detached OpenPGP signature by this key over \"keyoxide-directory listing v1\\ninstance=<instance>\\n\". The operator asking to be listed; checked by `npm run verify:entries`, never by the page.",
       "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     },
     "hkpEntry": {
       "type": "object",
       "description": "A key looked up on keys.openpgp.org by fingerprint.",
       "additionalProperties": false,
-      "required": ["type", "fingerprint", "instance"],
+      "required": ["type", "fingerprint", "instance", "signature"],
       "properties": {
         "type": { "const": "hkp" },
         "fingerprint": {
@@ -49,7 +49,7 @@
       "type": "object",
       "description": "A key looked up in the domain's Web Key Directory. Carries the hashed local part, never the address itself.",
       "additionalProperties": false,
-      "required": ["type", "domain", "hash", "instance"],
+      "required": ["type", "domain", "hash", "instance", "signature"],
       "properties": {
         "type": { "const": "wkd" },
         "domain": {
