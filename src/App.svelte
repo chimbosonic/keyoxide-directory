@@ -67,8 +67,8 @@
     <div>
       <h1>Keyoxide Instance Directory</h1>
       <p class="subtitle">
-        Deployments whose operators have proven the domain they run on, checked in your
-        browser against published OpenPGP keys.
+        Keyoxide deployments, each verified in your browser against the operator's
+        published key.
       </p>
     </div>
     {#if instances}
