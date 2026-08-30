@@ -11,14 +11,14 @@
   const LABELS: Record<CardStatus, string> = {
     project: 'project instance',
     verified: 'verified',
-    unconfirmed: 'deployment does not confirm',
-    contested: 'deployment names another key',
-    'dns-error': 'confirmation lookup failed',
-    mismatch: 'claims another deployment',
+    unconfirmed: 'domain name does not confirm key',
+    contested: 'domain name links another key',
+    'dns-error': 'domain name lookup failed',
+    mismatch: 'key claims another instance',
     'no-notation': 'no claim on key',
     'not-found': 'key not found',
     unreadable: 'key unreadable',
-    'fetch-error': 'lookup failed',
+    'fetch-error': 'key lookup failed',
   }
 
   const LIVENESS_LABELS: Record<Liveness, string> = {

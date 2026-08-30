@@ -159,7 +159,7 @@ test.describe('directory', () => {
     await expect(page.locator('[data-status="verified"]')).toHaveCount(0)
     const card = page.locator('[data-status="unconfirmed"]')
     await expect(card).toHaveCount(1)
-    await expect(card.getByTestId('verification')).toContainText('deployment does not confirm')
+    await expect(card.getByTestId('verification')).toContainText('domain name does not confirm key')
     await expect(page.getByTestId('summary')).toHaveText(`0 of ${ENTRIES.length} verified`)
   })
 
@@ -168,7 +168,7 @@ test.describe('directory', () => {
 
     const card = page.locator('[data-status="contested"]')
     await expect(card).toHaveCount(1)
-    await expect(card.getByTestId('verification')).toContainText('deployment names another key')
+    await expect(card.getByTestId('verification')).toContainText('domain name links another key')
   })
 
   test('flags a key that claims a different deployment', async ({ page }) => {
