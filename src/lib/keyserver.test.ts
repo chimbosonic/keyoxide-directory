@@ -1,15 +1,10 @@
 import { KEYSERVER, fetchKey, keyUrl } from './keyserver'
-import type { HkpEntry } from './validateKeys'
+import type { HkpSource } from './validateKeys'
 
 const LONG_ID = '3AA5C34371567BD2'
 const FULL_FPR = '3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11'
-const INSTANCE = 'https://kx.example.org'
 
-const fprEntry = (fingerprint: string): HkpEntry => ({
-  type: 'hkp',
-  fingerprint,
-  instance: INSTANCE,
-})
+const fprEntry = (fingerprint: string): HkpSource => ({ type: 'hkp', fingerprint })
 
 const respond = (body: string, init: ResponseInit = {}) =>
   vi.fn(async () => new Response(body, { status: 200, ...init }))

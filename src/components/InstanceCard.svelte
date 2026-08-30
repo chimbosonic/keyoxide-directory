@@ -16,6 +16,7 @@
     'dns-error': 'domain name lookup failed',
     mismatch: 'key proves another domain',
     'no-notation': 'no domain proof on key',
+    unvalidated: 'key record not dnssec-signed',
     'not-found': 'key not found',
     unreadable: 'key unreadable',
     'fetch-error': 'key lookup failed',

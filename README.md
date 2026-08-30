@@ -85,6 +85,7 @@ Every other card shows two independent pills:
 | **domain name lookup failed** | no resolver could be reached, so ownership is unknown |
 | **key proves another domain** | the key carries dns proofs, none covering this deployment |
 | **no domain proof on key** | the key was fetched but proves no domain over dns |
+| **key record not dnssec-signed** | a DANE record is published, in a zone the resolver would not vouch for |
 | **key not found** | the source has no such key: the keyserver does not hold it, or the domain publishes none |
 | **key unreadable** | the key was fetched but could not be parsed |
 | **key lookup failed** | network, CORS, or a server error |
@@ -122,25 +123,45 @@ verify here too, or reusing an existing proof would not reuse much.
 
 ## Where keys are fetched from
 
-Each entry names its own lookup, so the two routes are never confused:
+An entry lists every place its key can be fetched from, and they are tried in
+this order — whatever order the entry happens to write them in, so no entry ends
+up preferring the keyserver by accident:
 
-| `type` | identified by | fetched from |
-|---|---|---|
-| `hkp` | `fingerprint` | keys.openpgp.org, over VKS |
-| `wkd` | `domain` + `hash` | that domain's Web Key Directory |
+| `type` | identified by | fetched from | needs |
+|---|---|---|---|
+| `dane` | `domain` + `hash` | an RFC 7929 OPENPGPKEY record | a DNSSEC-signed zone |
+| `wkd` | `domain` + `hash` | that domain's Web Key Directory | CORS headers on the operator's server |
+| `hkp` | `fingerprint` | keys.openpgp.org, over VKS | nothing |
 
-keys.openpgp.org sends `access-control-allow-origin: *` on every VKS endpoint,
-which is what makes a directory with no backend possible. The `hkp` name follows
-Keyoxide's own URL vocabulary; the transport is really VKS, its REST interface,
-not the HKP protocol.
+They are a fallback chain, not alternatives: the same key in several places, so
+the first that answers settles it and the rest are never asked. A source that has
+nothing to say does not end the chain — an operator publishing over DANE and on
+the keyserver is not undone by a WKD host that 404s. When none answers, the
+failure reported is the first that was more than an absence.
 
-A `wkd` entry is tried at the advanced URL first and the direct URL second, the
-order the spec prescribes. There is no fallback between the two *types*: VKS can
-look a key up only by fingerprint or by a plaintext address, and a `wkd` entry
-stores neither, so if WKD does not answer there is nothing else to try. WKD also
-depends on the operator's own server sending CORS headers, which many do not —
-that is a real cost of the route, paid in exchange for not putting an address in
-this repository.
+`dane` leads because it asks least of the operator. WKD runs in the visitor's
+browser against the operator's own server, so that server must send
+`access-control-allow-origin: *`, and many do not; the card then reads *key
+lookup failed* through no fault of the key. The DoH resolvers already send that
+header, because the ownership lookup depends on it.
+
+The price of `dane` is that the resolver becomes the source of both the key and
+the record confirming it, where the other two routes fetch the key over TLS from
+a party independent of the resolver. DNSSEC is what is left standing, so a DANE
+record is only accepted when the resolver reports `AD: true`. That flag is still
+the resolver's own claim — worthless against a hostile resolver, real against a
+spoofed zone upstream of an honest one. Unsigned zones publishing OPENPGPKEY are
+ordinary rather than rare, so this genuinely excludes people.
+
+A `wkd` source is tried at the advanced URL first and the direct URL second, the
+order the spec prescribes. `hkp` follows Keyoxide's own URL vocabulary; the
+transport is really VKS, keys.openpgp.org's REST interface, not the HKP protocol,
+and it sends `access-control-allow-origin: *` on every endpoint — which is what
+made a directory with no backend possible in the first place.
+
+Sources must all be the same key. Nothing in the page checks that, because the
+page stops at the first answer; `verify:entries` fetches every one of them and
+fails if their fingerprints disagree.
 
 ## Privacy
 
@@ -150,10 +171,11 @@ grouped. User ids are absent from the parse result's type entirely, so they
 cannot reach the page by accident, and both the unit and browser suites assert
 that no address appears in the DOM.
 
-No address is stored either. A `wkd` entry carries the z-base-32 SHA-1 of the
-local part, which is all a WKD URL is built from, so nothing in this repository
-or the shipped bundle is an address. `npm run wkd-hash <address>` computes it
-locally and sends nothing anywhere.
+No address is stored either. A `wkd` source carries the z-base-32 SHA-1 of the
+local part and a `dane` source the SHA-256 of it truncated to 28 octets, which is
+all their respective URLs and record names are built from, so nothing in this
+repository or the shipped bundle is an address. `npm run wkd-hash <address>` and
+`npm run dane-hash <address>` compute them locally and send nothing anywhere.
 
 Checking ownership means the page also asks a DNS-over-HTTPS resolver about each
 proven domain, which is a third party it did not previously contact. What that
@@ -161,11 +183,12 @@ resolver learns is the domains named by proofs already published on public keys,
 not anything about the visitor beyond their having opened the directory. It is
 still a party in the loop, and worth knowing about.
 
-Be clear-eyed about what that hash buys, though: it is an unsalted SHA-1 of a
-lowercased local part, sitting next to the domain in the clear. It stops a
-scraper's regex, not someone willing to run a wordlist of common local parts. An
-`hkp` entry, which derives nothing from an address at all, is the stronger
-choice.
+Be clear-eyed about what those hashes buy, though. Both are unsalted digests of a
+lowercased local part, sitting next to the domain in the clear; DANE's SHA-256 is
+the better digest and buys nothing extra here, because the weakness is the
+absence of a salt, not the choice of function. They stop a scraper's regex, not
+someone willing to run a wordlist of common local parts. An `hkp` source, which
+derives nothing from an address at all, is the stronger choice.
 
 ## Development
 
@@ -177,7 +200,8 @@ $ npm run test:e2e       # Playwright, against the production build
 $ npm run test:entries   # resolve every listed entry against the real network
 $ npm run validate:keys  # schema-check src/data/keys.json
 $ npm run verify:entries # check each entry's signature against its own key
-$ npm run wkd-hash <addr> # print the wkd entry for an address
+$ npm run wkd-hash <addr>  # print the wkd source for an address
+$ npm run dane-hash <addr> # print the dane source for an address
 $ npm run check          # svelte-check
 $ npm run build          # -> dist/
 ```
@@ -201,8 +225,16 @@ subpacket parsed under each — against this key it reports the Mastodon URL and
 loses both dns proofs. That is why the parser reads `rawNotations` instead.
 
 The z-base-32 hashing is checked against the worked example published in
-draft-koch-openpgp-webkey-service, so the directory cannot drift into looking
-somewhere no other WKD client would.
+draft-koch-openpgp-webkey-service, and the DANE hashing against the one in RFC
+7929, so the directory cannot drift into looking somewhere no other client would.
+
+The two resolvers do not agree on how to write an OPENPGPKEY record's rdata:
+dns.google returns RFC 3597 generic form, `\# 7328 c6c14d04…`, and
+cloudflare-dns.com returns presentation form, `( xsFNBGGToPw… )`. Both framings
+are pinned as fixtures under `tests/fixtures/dane`, captured from live answers for
+one real record and applied to a throwaway fixture key. Only one is exercised in
+normal operation, so a bug in the other decoder would stay hidden until the first
+resolver went down — which is why both are tested against the same bytes.
 
 `validate:keys` proves an entry is well-formed, `verify:entries` proves the
 operator asked for it, and `test:entries` proves it is *true*. It loads the production build in a real browser with no stubbing and

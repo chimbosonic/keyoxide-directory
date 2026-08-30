@@ -1,5 +1,5 @@
 /**
- * Prints the keys.json entry for an address, so a contributor never has to put
+ * Prints the keys.json source for an address, so a contributor never has to put
  * the address itself in the file. Run: npm run wkd-hash you@example.org
  *
  * The address is an argument to a local command and goes nowhere: nothing here
@@ -7,10 +7,10 @@
  */
 import { wkdHash } from '../src/lib/wkdHash.ts'
 
-const [address, instance] = process.argv.slice(2)
+const [address] = process.argv.slice(2)
 
 if (address === undefined) {
-  console.error('usage: npm run wkd-hash <address> [instance-url]')
+  console.error('usage: npm run wkd-hash <address>')
   process.exit(1)
 }
 
@@ -22,14 +22,8 @@ try {
   process.exit(1)
 }
 
-const entry = {
-  type: 'wkd',
-  domain: identity.domain,
-  hash: identity.hash,
-  instance: instance ?? 'https://kx.example.org',
-}
-
-console.log(JSON.stringify(entry, null, 2))
+console.log(JSON.stringify({ type: 'wkd', domain: identity.domain, hash: identity.hash }, null, 2))
 console.error(
-  `\nPublish your key to ${identity.domain}'s Web Key Directory, then add the above to src/data/keys.json.`,
+  `\nPublish your key to ${identity.domain}'s Web Key Directory, with CORS headers` +
+    `\non the /.well-known/openpgpkey/ path, then add the above to your entry's sources.`,
 )

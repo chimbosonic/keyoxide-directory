@@ -1,8 +1,9 @@
+import { fetchDaneKey } from './dane.ts'
 import { deploymentHost } from './format'
 import { fetchKey, type FetchOptions } from './keyserver'
 import { claimedFingerprints, fetchOwnershipRecords } from './ownership'
 import { parseKey, type KeyMaterial } from './parseKey'
-import { isHkpEntry, type KeyEntry } from './validateKeys'
+import { orderedSources, type KeyEntry, type KeySource } from './validateKeys'
 import { fetchWkdKey } from './wkd'
 
 export type ResolvedStatus =
@@ -18,7 +19,9 @@ export type ResolvedStatus =
   | 'mismatch'
   /** The key was fetched, and proves no domain over dns at all. */
   | 'no-notation'
-  /** The source has no such key: the keyserver does not hold it, or the domain publishes none. */
+  /** A DANE record exists, but the resolver would not vouch for its zone. */
+  | 'unvalidated'
+  /** No source has the key: the keyserver does not hold it, or the domain publishes none. */
   | 'not-found'
   /** The key was fetched but could not be parsed. */
   | 'unreadable'
@@ -92,20 +95,22 @@ export function coveringDomain(domains: readonly string[], host: string | null):
   )
 }
 
-type MaterialResult =
-  | { status: 'ok'; key: KeyMaterial }
+type SourceFailure =
   | { status: 'not-found'; reason: string }
+  | { status: 'unvalidated'; reason: string }
   | { status: 'fetch-error'; reason: string }
 
-/**
- * Routes an entry to its transport. The two are disjoint by construction: a
- * fingerprint is what VKS can look up, a domain and hash is what WKD can, and
- * neither source can serve the other's entries, so there is nothing to fall
- * back to when one fails.
- */
-async function fetchMaterial(entry: KeyEntry, options: FetchOptions): Promise<MaterialResult> {
-  if (isHkpEntry(entry)) {
-    const fetched = await fetchKey(entry, options)
+type SourceResult = { status: 'ok'; key: KeyMaterial } | SourceFailure
+
+type MaterialResult = SourceResult
+
+/** Fetches a key from one declared source. */
+async function fetchFromSource(
+  source: KeySource,
+  options: FetchOptions,
+): Promise<SourceResult> {
+  if (source.type === 'hkp') {
+    const fetched = await fetchKey(source, options)
     return fetched.status === 'ok'
       ? { status: 'ok', key: fetched.armored }
       : fetched.status === 'not-found'
@@ -113,12 +118,55 @@ async function fetchMaterial(entry: KeyEntry, options: FetchOptions): Promise<Ma
         : { status: 'fetch-error', reason: fetched.reason }
   }
 
-  const fetched = await fetchWkdKey(entry.domain, entry.hash, { fetch: options.fetch })
+  if (source.type === 'dane') {
+    const fetched = await fetchDaneKey(source.domain, source.hash, { fetch: options.fetch })
+    return fetched.status === 'ok'
+      ? { status: 'ok', key: fetched.key }
+      : fetched.status === 'not-found'
+        ? { status: 'not-found', reason: `no openpgpkey record at ${source.domain}` }
+        : fetched.status === 'unvalidated'
+          ? { status: 'unvalidated', reason: `${source.domain} is not a dnssec-signed zone` }
+          : { status: 'fetch-error', reason: fetched.reason }
+  }
+
+  const fetched = await fetchWkdKey(source.domain, source.hash, { fetch: options.fetch })
   return fetched.status === 'ok'
     ? { status: 'ok', key: fetched.key }
     : fetched.status === 'not-found'
-      ? { status: 'not-found', reason: `no key published at ${entry.domain}` }
+      ? { status: 'not-found', reason: `no key published at ${source.domain}` }
       : { status: 'fetch-error', reason: fetched.reason }
+}
+
+/**
+ * Tries an entry's sources in order and returns the first key one yields.
+ *
+ * They are a fallback chain: the same key in several places, so the first that
+ * answers settles it and the rest are never asked. Which is why a source that
+ * merely has nothing to say does not end the chain — an operator who publishes
+ * over DANE and on the keyserver should not be undone by a WKD host that 404s.
+ *
+ * When none answers, the failure reported is the first one that was more than
+ * "nothing here", in the same order. A DANE record on an unsigned zone is a
+ * misconfiguration of the operator's first-choice route and worth naming, while
+ * a source that simply holds no key is only worth reporting if every source
+ * agreed on it.
+ */
+async function fetchMaterial(entry: KeyEntry, options: FetchOptions): Promise<MaterialResult> {
+  const failures: SourceFailure[] = []
+
+  for (const source of orderedSources(entry)) {
+    const result = await fetchFromSource(source, options)
+    if (result.status === 'ok') return result
+    failures.push(result)
+  }
+
+  const notable = failures.find((failure) => failure.status !== 'not-found')
+  if (notable !== undefined) return notable
+
+  return {
+    status: 'not-found',
+    reason: failures.map((failure) => failure.reason).join('; ') || 'the entry lists no source',
+  }
 }
 
 /** Fetches, parses, and classifies a single directory entry. */

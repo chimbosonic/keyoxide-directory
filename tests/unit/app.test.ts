@@ -7,7 +7,11 @@ import type { KeyEntry } from '../../src/lib/validateKeys'
 
 const FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 
-const entry = (instance: string): KeyEntry => ({ type: 'hkp', fingerprint: FPR, instance })
+const entry = (instance: string): KeyEntry => ({
+  instance,
+  signature: 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA==',
+  sources: [{ type: 'hkp', fingerprint: FPR }],
+})
 
 const instanceHostOf = (instance: string) => new URL(instance).hostname
 

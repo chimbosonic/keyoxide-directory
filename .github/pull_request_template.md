@@ -60,10 +60,97 @@ instance URL exactly as you write it in the entry — a trailing slash added
 afterwards invalidates it. `npm run verify:entries` checks this, and it is the
 one thing about your entry nobody else could have produced.
 
-## 3. Publish your key, and pick the lookup that matches
+## 3. Publish your key, and list where it can be found
 
-Every entry names the lookup the directory should use. Choose the one that
-matches where your key lives.
+An entry lists every place its key can be fetched from, and you can declare all
+three. They are a fallback chain: the same key in several places, tried `dane`,
+then `wkd`, then `hkp`, whatever order you write them in. The first that answers
+settles it, and a route that has nothing to say does not sink the entry.
+
+Declaring more than one is worth doing. Each route fails in its own way — a zone
+that stops validating, a server that drops its CORS header, a keyserver outage —
+and they do not fail together.
+
+The finished entry looks like this:
+
+```json
+{
+  "instance": "https://kx.example.org",
+  "signature": "<the base64 from step 2>",
+  "sources": [
+    { "type": "dane", "domain": "example.org", "hash": "c93f1e400f26708f98cb19d936620da35eec8f72e57f9eec01c1afd6" },
+    { "type": "wkd", "domain": "example.org", "hash": "tm4s53wnx8fs6zsorm3tihcmu9ghamw1" },
+    { "type": "hkp", "fingerprint": "3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11" }
+  ]
+}
+```
+
+Every source must be the same key. `npm run verify:entries` fetches all of them
+and fails if their fingerprints disagree.
+
+### `dane` — the key is an OPENPGPKEY record in your DNS
+
+The route that asks least of you: no web server, no CORS headers, nothing to keep
+running. Compute the record name:
+
+```console
+$ npm run dane-hash you@example.org
+{
+  "type": "dane",
+  "domain": "example.org",
+  "hash": "c93f1e400f26708f98cb19d936620da35eec8f72e57f9eec01c1afd6"
+}
+```
+
+and publish your key there, as RFC 7929 prescribes:
+
+```console
+$ gpg --export you@example.org | gpg --dearmor > key.bin   # binary, not armored
+$ # then publish key.bin as the OPENPGPKEY rdata at
+$ #   <hash>._openpgpkey.example.org
+```
+
+Two things worth knowing:
+
+- **Your zone must be DNSSEC-signed.** The directory only accepts a DANE record
+  when the resolver reports it validated. Over this route the resolver hands the
+  page both your key and the record confirming it, so DNSSEC is the only thing
+  left standing; without it your card reads *key record not dnssec-signed*.
+- **`dig` will usually show you nothing.** A key does not fit in a UDP answer, so
+  `dig` comes back empty at default settings and the record looks missing when it
+  is fine. Check it the way the directory does, over DNS-over-HTTPS:
+
+```console
+$ curl -s -H 'accept: application/dns-json' \
+    'https://dns.google/resolve?name=<hash>._openpgpkey.example.org&type=61'
+```
+
+Note `type=61` rather than `type=OPENPGPKEY`: dns.google rejects the name with a
+400.
+
+### `wkd` — the key is in your domain's Web Key Directory
+
+If you publish your own key over WKD, the directory can fetch it from you
+directly, with no keyserver in between. Your address is *not* stored: the source
+carries only the hash WKD builds its URL from. Compute it:
+
+```console
+$ npm run wkd-hash you@example.org
+{
+  "type": "wkd",
+  "domain": "example.org",
+  "hash": "tm4s53wnx8fs6zsorm3tihcmu9ghamw1"
+}
+```
+
+The address is only ever an argument to that local command — it is not sent
+anywhere, and is not what you commit.
+
+**Your server must send CORS headers.** The lookup runs in the visitor's browser,
+so your WKD host needs `access-control-allow-origin: *` on the
+`/.well-known/openpgpkey/` path. Without it the fetch is blocked. This is the
+single most common reason a `wkd` source goes quiet, and the reason `dane` is
+tried first.
 
 ### `hkp` — the key is on keys.openpgp.org
 
@@ -73,55 +160,21 @@ Publish it:
 $ gpg --export --armor <YOUR-FINGERPRINT> | curl -T - https://keys.openpgp.org/vks/v1/upload
 ```
 
-and add an entry naming your fingerprint:
+and name your fingerprint:
 
 ```json
-{
-  "type": "hkp",
-  "fingerprint": "3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11",
-  "instance": "https://kx.example.org",
-  "signature": "<the base64 from step 2>"
-}
+{ "type": "hkp", "fingerprint": "3AA5C34371567BD2C5A1F0F1D0F4C2E8B7A69C11" }
 ```
 
 `fingerprint` is a 40-character fingerprint or a 16-character long key id. Short
-key ids are rejected because they are collision-prone.
+key ids are rejected because they are collision-prone. This route needs nothing
+of you beyond the upload, which is why it is the last resort rather than the
+first choice: it is the one copy you do not serve.
 
-### `wkd` — the key is in your domain's Web Key Directory
-
-If you publish your own key over WKD, the directory can fetch it from you
-directly, with no keyserver in between. Your address is *not* stored: the entry
-carries only the hash WKD builds its URL from. Compute it:
-
-```console
-$ npm run wkd-hash you@example.org
-{
-  "type": "wkd",
-  "domain": "example.org",
-  "hash": "tm4s53wnx8fs6zsorm3tihcmu9ghamw1",
-  "instance": "https://kx.example.org"
-}
-```
-
-Paste that into `src/data/keys.json`, with your own `instance` and `signature`. The address is
-only ever an argument to that local command — it is not sent anywhere, and is
-not what you commit.
-
-Two things worth knowing before choosing `wkd`:
-
-- **Your server must send CORS headers.** The lookup runs in the visitor's
-  browser, so your WKD host needs `access-control-allow-origin: *` on the
-  `/.well-known/openpgpkey/` path. Without it the fetch is blocked and your card
-  reads *lookup failed*. keys.openpgp.org sends it on every endpoint, which is
-  why `hkp` entries need nothing from you.
-- **There is no fallback.** A `wkd` entry is resolved only over WKD. If your
-  domain stops serving the key, the entry does not quietly fall back to a
-  keyserver — it reports that nothing was published.
-
-The hash is not a secret, incidentally. It is an unsalted SHA-1 of your
-lowercased local part next to your domain in the clear, so it defeats address
-scrapers, not a determined person with a wordlist. Use `hkp` with a fingerprint
-if you want nothing derived from your address in the file at all.
+Neither hash is a secret, incidentally. Both are unsalted digests of your
+lowercased local part next to your domain in the clear, so they defeat address
+scrapers, not a determined person with a wordlist. Use `hkp` alone if you want
+nothing derived from your address in the file at all.
 
 ## 4. Check it locally
 
@@ -139,9 +192,10 @@ $ npm run test:unit
 - [ ] That domain publishes an `openpgp4fpr` TXT record naming my fingerprint,
       and `dig` shows it.
 - [ ] My entry carries a `signature` over the instance exactly as written.
-- [ ] My key can be fetched: published to keys.openpgp.org for an `hkp` entry,
-      or served over WKD with CORS headers for a `wkd` entry.
-- [ ] I added exactly one entry, and its `type` matches how my key is published.
+- [ ] Every source I listed serves the same key, and I checked each one resolves.
+- [ ] If I listed `dane`, my zone is DNSSEC-signed.
+- [ ] If I listed `wkd`, my server sends CORS headers on `/.well-known/openpgpkey/`.
+- [ ] I added exactly one entry, with at least one source.
 - [ ] `npm run validate:keys` passes.
 
 ## What the site will show
@@ -151,6 +205,5 @@ of your fingerprint) and two pills: whether the proof verified, and whether the
 deployment answered. Your user id and address are never rendered.
 
 If something is wrong the entry still appears, marked with what was wrong — a key
-proving only other domains, a key carrying no dns proof, a key that could not be
-found where the entry said it would be, or a domain that does not name your key
-back.
+proving only other domains, a key carrying no dns proof, a key that none of your
+sources could produce, or a domain that does not name your key back.

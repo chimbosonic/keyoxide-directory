@@ -14,9 +14,11 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
 import { canonicalEntryString, verifyEntrySignature } from '../src/lib/entrySignature.ts'
+import { fetchDaneKey } from '../src/lib/dane.ts'
 import { fetchKey } from '../src/lib/keyserver.ts'
 import { fetchWkdKey } from '../src/lib/wkd.ts'
-import { isHkpEntry, type KeyEntry } from '../src/lib/validateKeys.ts'
+import { orderedSources, sourceIdentity, type KeyEntry, type KeySource } from '../src/lib/validateKeys.ts'
+import { parseKey } from '../src/lib/parseKey.ts'
 import type { KeyMaterial } from '../src/lib/parseKey.ts'
 
 type SignedEntry = KeyEntry & { signature?: string }
@@ -26,20 +28,35 @@ type Material = { status: 'ok'; key: KeyMaterial } | { status: 'error'; reason: 
 /**
  * The same routing resolveEntry does, repeated rather than imported: resolve.ts
  * reaches the rest of the browser code through extensionless specifiers node
- * cannot resolve, while the two fetchers are leaves it can.
+ * cannot resolve, while the fetchers are leaves it can.
  */
-async function fetchMaterial(entry: KeyEntry): Promise<Material> {
-  if (isHkpEntry(entry)) {
-    const fetched = await fetchKey(entry)
+async function fetchFrom(source: KeySource): Promise<Material> {
+  if (source.type === 'hkp') {
+    const fetched = await fetchKey(source)
     return fetched.status === 'ok'
       ? { status: 'ok', key: fetched.armored }
       : { status: 'error', reason: fetched.status === 'not-found' ? 'not on the keyserver' : fetched.reason }
   }
 
-  const fetched = await fetchWkdKey(entry.domain, entry.hash)
+  if (source.type === 'dane') {
+    const fetched = await fetchDaneKey(source.domain, source.hash)
+    if (fetched.status === 'ok') return { status: 'ok', key: fetched.key }
+
+    return {
+      status: 'error',
+      reason:
+        fetched.status === 'not-found'
+          ? `no openpgpkey record at ${source.domain}`
+          : fetched.status === 'unvalidated'
+            ? `${source.domain} is not a dnssec-signed zone`
+            : fetched.reason,
+    }
+  }
+
+  const fetched = await fetchWkdKey(source.domain, source.hash)
   return fetched.status === 'ok'
     ? { status: 'ok', key: fetched.key }
-    : { status: 'error', reason: fetched.status === 'not-found' ? `not published at ${entry.domain}` : fetched.reason }
+    : { status: 'error', reason: fetched.status === 'not-found' ? `not published at ${source.domain}` : fetched.reason }
 }
 
 const keysFile = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'data', 'keys.json')
@@ -57,19 +74,39 @@ for (const [index, entry] of entries.entries()) {
     continue
   }
 
-  const fetched = await fetchMaterial(entry)
-  if (fetched.status !== 'ok') {
-    failures.push(`${label}: ${fetched.reason}`)
-    continue
-  }
+  // Every source, not just the first the page would settle for: they are meant
+  // to be one key in several places, and nothing else checks that they are.
+  let fingerprint: string | null = null
 
-  const verified = await verifyEntrySignature(fetched.key, entry.instance, entry.signature)
-  if (verified.status !== 'ok') {
-    failures.push(`${label}: the signature does not verify (${verified.reason})`)
-    continue
-  }
+  for (const source of orderedSources(entry)) {
+    const where = `${label} ${sourceIdentity(source)}`
 
-  console.log(`OK ${label}`)
+    const fetched = await fetchFrom(source)
+    if (fetched.status !== 'ok') {
+      failures.push(`${where}: ${fetched.reason}`)
+      continue
+    }
+
+    const parsed = await parseKey(fetched.key)
+    if (parsed.status !== 'ok') {
+      failures.push(`${where}: the key could not be parsed (${parsed.reason})`)
+      continue
+    }
+
+    if (fingerprint !== null && parsed.key.fingerprint !== fingerprint) {
+      failures.push(`${where}: serves a different key from the entry's other sources`)
+      continue
+    }
+    fingerprint = parsed.key.fingerprint
+
+    const verified = await verifyEntrySignature(fetched.key, entry.instance, entry.signature)
+    if (verified.status !== 'ok') {
+      failures.push(`${where}: the signature does not verify (${verified.reason})`)
+      continue
+    }
+
+    console.log(`OK ${where}`)
+  }
 }
 
 if (failures.length > 0) {

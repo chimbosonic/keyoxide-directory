@@ -1,5 +1,5 @@
 import { readKey } from 'openpgp'
-import { PROOF_NOTATION_NAMES, parseDnsClaim } from './notation'
+import { PROOF_NOTATION_NAMES, parseDnsClaim } from './notation.ts'
 
 /**
  * What the directory needs from a key, and nothing more. User ids are

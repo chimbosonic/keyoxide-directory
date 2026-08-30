@@ -1,4 +1,4 @@
-import type { HkpEntry } from './validateKeys'
+import type { HkpSource } from './validateKeys'
 
 /**
  * Where `hkp` entries are resolved. keys.openpgp.org answers every VKS endpoint
@@ -26,12 +26,12 @@ export interface FetchOptions {
 }
 
 /** Builds the VKS lookup URL for an entry. */
-export function keyUrl(entry: HkpEntry, base: string = KEYSERVER): string {
+export function keyUrl(source: HkpSource, base: string = KEYSERVER): string {
   const root = `${base.replace(/\/+$/, '')}/vks/v1`
 
   // VKS splits these: 40 hex characters is a fingerprint, 16 is a long key id.
-  const endpoint = entry.fingerprint.length === 40 ? 'by-fingerprint' : 'by-keyid'
-  return `${root}/${endpoint}/${entry.fingerprint.toUpperCase()}`
+  const endpoint = source.fingerprint.length === 40 ? 'by-fingerprint' : 'by-keyid'
+  return `${root}/${endpoint}/${source.fingerprint.toUpperCase()}`
 }
 
 /**
@@ -40,11 +40,11 @@ export function keyUrl(entry: HkpEntry, base: string = KEYSERVER): string {
  * or CORS failure, because the two mean different things on the rendered card.
  */
 export async function fetchKey(
-  entry: HkpEntry,
+  source: HkpSource,
   options: FetchOptions = {},
 ): Promise<KeyFetchResult> {
   const doFetch = options.fetch ?? globalThis.fetch
-  const url = keyUrl(entry, options.base ?? KEYSERVER)
+  const url = keyUrl(source, options.base ?? KEYSERVER)
 
   let response: Response
   try {

@@ -5,7 +5,11 @@ import type { DirectoryCard, ResolvedInstance, ResolvedStatus } from '../lib/res
 const FPR = 'A78357EB843206292AD791A33D150A4804FDAB79'
 
 const resolved = (overrides: Partial<ResolvedInstance> = {}): ResolvedInstance => ({
-  entry: { type: 'hkp' as const, fingerprint: FPR, instance: 'https://kx.example.org' },
+  entry: {
+    instance: 'https://kx.example.org',
+    signature: 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA==',
+    sources: [{ type: 'hkp' as const, fingerprint: FPR }],
+  },
   declaredInstance: 'https://kx.example.org',
   provenDomains: ['kx.example.org'],
   confirmedVia: 'kx.example.org',
@@ -81,6 +85,7 @@ describe('InstanceCard', () => {
   const failures: Array<[ResolvedStatus, string]> = [
     ['mismatch', 'key proves another domain'],
     ['no-notation', 'no domain proof on key'],
+    ['unvalidated', 'key record not dnssec-signed'],
     ['not-found', 'key not found'],
     ['unreadable', 'key unreadable'],
     ['fetch-error', 'key lookup failed'],

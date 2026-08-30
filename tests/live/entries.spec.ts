@@ -14,7 +14,7 @@ import { expect, test } from '@playwright/test'
 // Playwright's loader wants an import attribute for JSON that buys us nothing here.
 const keysFile = JSON.parse(
   readFileSync(new URL('../../src/data/keys.json', import.meta.url), 'utf8'),
-) as { keys: { type: string; instance: string }[] }
+) as { keys: { instance: string; sources: { type: string }[] }[] }
 
 const entries = keysFile.keys
 
@@ -27,7 +27,9 @@ if (entries.length === 0) {
 }
 
 for (const entry of entries) {
-  test(`${entry.instance} verifies against its published key (${entry.type})`, async ({
+  const sources = entry.sources.map((source) => source.type).join(', ')
+
+  test(`${entry.instance} verifies against its published key (${sources})`, async ({
     page,
   }, testInfo) => {
     await page.goto('/')

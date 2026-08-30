@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { resolve as resolvePath } from 'node:path'
+import { OPENPGPKEY, TXT } from './doh'
 import { coveringDomain, coversHost, resolveAll, resolveEntry } from './resolve'
-import type { KeyEntry } from './validateKeys'
+import type { KeyEntry, KeySource } from './validateKeys'
 
 const fixture = (name: string) =>
   readFileSync(resolvePath(__dirname, '../../tests/fixtures/keys', `${name}.asc`), 'utf8')
@@ -13,20 +14,23 @@ const PROOFS_FPR = '7853FDF799B81400814C279B187149C137000B9D'
 /** Proves nothing: no notations at all. */
 const PLAIN_FPR = 'E9B57E7488818FE8A72CB8A20A6899A0D2FBBD4E'
 
-const entry = (instance: string): KeyEntry => ({
-  type: 'hkp',
-  fingerprint: '3AA5C34371567BD2',
-  instance,
-})
-
 const HASH = 'ybndrfg8ejkmcpqxot1uwisza345h769'
+const DANE_HASH = 'c93f1e400f26708f98cb19d936620da35eec8f72e57f9eec01c1afd6'
+const SIGNATURE = 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA=='
 
-const wkdEntry = (instance: string): KeyEntry => ({
-  type: 'wkd',
-  domain: 'example.net',
-  hash: HASH,
+const HKP: KeySource = { type: 'hkp', fingerprint: '3AA5C34371567BD2' }
+const WKD: KeySource = { type: 'wkd', domain: 'example.net', hash: HASH }
+const DANE: KeySource = { type: 'dane', domain: 'example.net', hash: DANE_HASH }
+
+const listing = (instance: string, ...sources: KeySource[]): KeyEntry => ({
   instance,
+  signature: SIGNATURE,
+  sources,
 })
+
+const entry = (instance: string): KeyEntry => listing(instance, HKP)
+const wkdEntry = (instance: string): KeyEntry => listing(instance, WKD)
+const daneEntry = (instance: string): KeyEntry => listing(instance, DANE)
 
 /** The same key WKD would serve: the armored fixture with its armor stripped. */
 const binaryFixture = (name: string) =>
@@ -36,6 +40,27 @@ const binaryFixture = (name: string) =>
 type FetchInput = Parameters<typeof globalThis.fetch>[0]
 
 const DOH = /dns\.google|cloudflare-dns\.com/
+const isOwnershipQuery = (url: string) => DOH.test(url) && url.includes(`type=${TXT}`)
+const isDaneQuery = (url: string) => DOH.test(url) && url.includes(`type=${OPENPGPKEY}`)
+
+/** An OPENPGPKEY answer, in the generic form dns.google returns. */
+const daneAnswer = (key: Uint8Array, ad = true) =>
+  new Response(
+    JSON.stringify({
+      Status: 0,
+      AD: ad,
+      Answer: [
+        {
+          type: OPENPGPKEY,
+          data: `\\# ${key.length} ${[...key].map((b) => b.toString(16).padStart(2, '0')).join('')}`,
+        },
+      ],
+    }),
+    { status: 200 },
+  )
+
+const emptyAnswer = (ad = true) =>
+  new Response(JSON.stringify({ Status: 0, AD: ad }), { status: 200 })
 
 const ownershipAnswer = (...fingerprints: string[]) =>
   new Response(
@@ -55,7 +80,7 @@ const ownershipAnswer = (...fingerprints: string[]) =>
  * owner is the fixture's own key, so a key proving the right domain verifies.
  */
 const serve = (key: () => Response, owner: () => Response = () => ownershipAnswer(PROOF_FPR)) =>
-  vi.fn(async (input: FetchInput) => (DOH.test(String(input)) ? owner() : key()))
+  vi.fn(async (input: FetchInput) => (isOwnershipQuery(String(input)) ? owner() : key()))
 
 const serving = (body: string, status = 200) => serve(() => new Response(body, { status }))
 
@@ -344,6 +369,111 @@ describe('resolveEntry', () => {
     ])
 
     for (const result of results) expect(result.declaredInstance).toBe(declared)
+  })
+})
+
+describe('resolveEntry, across several sources', () => {
+  const KEY = new Uint8Array(
+    readFileSync(resolvePath(__dirname, '../../tests/fixtures/keys/proof.gpg')),
+  )
+
+  /** Routes by record type and by host, so each source can answer separately. */
+  const chain = (handlers: {
+    dane?: () => Response
+    wkd?: () => Response
+    hkp?: () => Response
+  }) =>
+    vi.fn(async (input: FetchInput) => {
+      const url = String(input)
+      if (isOwnershipQuery(url)) return ownershipAnswer(PROOF_FPR)
+      if (isDaneQuery(url)) return handlers.dane?.() ?? emptyAnswer()
+      if (url.includes('keys.openpgp.org')) return handlers.hkp?.() ?? new Response('', { status: 404 })
+      return handlers.wkd?.() ?? new Response('', { status: 404 })
+    })
+
+  it('verifies from the first source that answers', async () => {
+    const fetchImpl = chain({ dane: () => daneAnswer(KEY) })
+    const result = await resolveEntry(listing('https://kx.example.org', HKP, WKD, DANE), {
+      fetch: fetchImpl,
+    })
+
+    expect(result.status).toBe('verified')
+
+    // DANE first regardless of the order they were listed in, and once it
+    // answers the others are never asked.
+    const requested = fetchImpl.mock.calls.map(([input]) => String(input))
+    expect(requested.some((url) => url.includes('keys.openpgp.org'))).toBe(false)
+    expect(requested.some((url) => url.includes('.well-known/openpgpkey'))).toBe(false)
+  })
+
+  it('falls through a source that has nothing published', async () => {
+    const fetchImpl = chain({
+      dane: () => emptyAnswer(),
+      wkd: () => new Response(binaryFixture('proof')),
+    })
+    const result = await resolveEntry(listing('https://kx.example.org', DANE, WKD), {
+      fetch: fetchImpl,
+    })
+
+    expect(result.status).toBe('verified')
+  })
+
+  /**
+   * A DANE record on an unsigned zone is refused, but refusing it must not take
+   * the entry down when the operator also published somewhere else.
+   */
+  it('falls through a dane record the resolver will not vouch for', async () => {
+    const fetchImpl = chain({
+      dane: () => daneAnswer(KEY, false),
+      hkp: () => new Response(fixture('proof')),
+    })
+    const result = await resolveEntry(listing('https://kx.example.org', DANE, HKP), {
+      fetch: fetchImpl,
+    })
+
+    expect(result.status).toBe('verified')
+  })
+
+  it('reports an unsigned zone when dane is the only source', async () => {
+    const fetchImpl = chain({ dane: () => daneAnswer(KEY, false) })
+    const result = await resolveEntry(daneEntry('https://kx.example.org'), { fetch: fetchImpl })
+
+    expect(result.status).toBe('unvalidated')
+    expect(result.reason).toContain('example.net')
+  })
+
+  it('reports not-found only when every source agrees there is nothing', async () => {
+    const fetchImpl = chain({})
+    const result = await resolveEntry(listing('https://kx.example.org', DANE, WKD, HKP), {
+      fetch: fetchImpl,
+    })
+
+    expect(result.status).toBe('not-found')
+  })
+
+  /**
+   * "Nothing published here" is weaker information than "this route is broken",
+   * so the failure reported is the first that was more than an absence.
+   */
+  it('prefers a real failure over a source that simply had nothing', async () => {
+    const fetchImpl = chain({
+      dane: () => emptyAnswer(),
+      wkd: () => new Response('', { status: 500 }),
+    })
+    const result = await resolveEntry(listing('https://kx.example.org', DANE, WKD), {
+      fetch: fetchImpl,
+    })
+
+    expect(result.status).toBe('fetch-error')
+  })
+
+  it('reports nothing about a source it never had to ask', async () => {
+    const fetchImpl = chain({ dane: () => daneAnswer(KEY), wkd: () => new Response('', { status: 500 }) })
+    const result = await resolveEntry(listing('https://kx.example.org', DANE, WKD), {
+      fetch: fetchImpl,
+    })
+
+    expect(result.status).toBe('verified')
   })
 })
 

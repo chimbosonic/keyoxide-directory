@@ -28,16 +28,27 @@ const MISSING = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'
  */
 async function stubResolvers(page: Page, owners: Record<string, string>) {
   await page.route(/dns\.google|cloudflare-dns\.com/, (route) => {
-    const name = new URL(route.request().url()).searchParams.get('name') ?? ''
-    const owner = owners[name.replace(/\.$/, '')]
+    const query = new URL(route.request().url()).searchParams
+    const name = (query.get('name') ?? '').replace(/\.$/, '')
 
+    // OPENPGPKEY, the DANE key route. Nothing here publishes one, so the answer
+    // is always empty and every entry falls through to its next source.
+    if (query.get('type') === '61') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/dns-json',
+        body: JSON.stringify({ Status: 0, AD: true }),
+      })
+    }
+
+    const owner = owners[name]
     return route.fulfill({
       status: 200,
       contentType: 'application/dns-json',
       body: JSON.stringify(
         owner === undefined
-          ? { Status: 0 }
-          : { Status: 0, Answer: [{ type: 16, data: `"openpgp4fpr:${owner}"` }] },
+          ? { Status: 0, AD: true }
+          : { Status: 0, AD: true, Answer: [{ type: 16, data: `"openpgp4fpr:${owner}"` }] },
       ),
     })
   })
@@ -64,12 +75,32 @@ async function stubKeyserver(page: Page) {
   })
 }
 
+/** Shaped like a real one; the page never reads it, only verify:entries does. */
+const SIGNATURE = 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA=='
+
+const listing = (instance: string, ...sources: unknown[]) => ({
+  instance,
+  signature: SIGNATURE,
+  sources,
+})
+
+const hkp = (fingerprint: string) => ({ type: 'hkp', fingerprint })
+
+/** RFC 7929's own example hash, standing in for a record nobody publishes here. */
+const DANE_HASH = 'c93f1e400f26708f98cb19d936620da35eec8f72e57f9eec01c1afd6'
+
 const ENTRIES = [
-  { type: 'hkp', fingerprint: PROOF, instance: 'https://kx.example.org' },
-  { type: 'hkp', fingerprint: PROOFS, instance: 'https://kx.multi.example.org' },
-  { type: 'hkp', fingerprint: PROOF, instance: 'https://elsewhere.example.org' },
-  { type: 'hkp', fingerprint: PLAIN, instance: 'https://plain.example.org' },
-  { type: 'hkp', fingerprint: MISSING, instance: 'https://gone.example.org' },
+  // Declares DANE ahead of the keyserver: nothing answers over DANE in this
+  // suite, so reaching verified proves the chain fell through to the next source.
+  listing(
+    'https://kx.example.org',
+    { type: 'dane', domain: 'kx.example.org', hash: DANE_HASH },
+    hkp(PROOF),
+  ),
+  listing('https://kx.multi.example.org', hkp(PROOFS)),
+  listing('https://elsewhere.example.org', hkp(PROOF)),
+  listing('https://plain.example.org', hkp(PLAIN)),
+  listing('https://gone.example.org', hkp(MISSING)),
 ]
 
 /**
@@ -209,6 +240,43 @@ test.describe('directory', () => {
     await expect(card).toHaveCount(1)
     await expect(card.getByTestId('verification')).toContainText('key proves another domain')
     await expect(card).toContainText('kx.example.org')
+  })
+
+  /**
+   * A DANE record is refused outright when the resolver will not vouch for the
+   * zone, and with no other source there is nothing to fall through to.
+   */
+  test('refuses a dane record on a zone the resolver will not vouch for', async ({ page }) => {
+    await page.route(/dns\.google|cloudflare-dns\.com/, (route) => {
+      const query = new URL(route.request().url()).searchParams
+      if (query.get('type') !== '61') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/dns-json',
+          body: JSON.stringify({ Status: 0, AD: true }),
+        })
+      }
+
+      // A record is there; the zone is not signed.
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/dns-json',
+        body: JSON.stringify({
+          Status: 0,
+          AD: false,
+          Answer: [{ type: 61, data: '\\# 2 abcd' }],
+        }),
+      })
+    })
+    await stubDeployments(page)
+    await page.addInitScript((seed) => {
+      ;(window as unknown as Record<string, unknown>)['__KEYOXIDE_DIRECTORY_ENTRIES__'] = seed
+    }, [listing('https://kx.example.org', { type: 'dane', domain: 'kx.example.org', hash: DANE_HASH })])
+    await page.goto('/')
+
+    const card = page.locator('[data-status="unvalidated"]')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('verification')).toContainText('key record not dnssec-signed')
   })
 
   test('flags a key carrying no proof', async ({ page }) => {

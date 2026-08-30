@@ -20,7 +20,7 @@
   "$defs": {
     "instance": {
       "type": "string",
-      "description": "The Keyoxide deployment this operator claims. Must match the notation on their key.",
+      "description": "The Keyoxide deployment this entry lists. Verified against the dns proofs on the operator's key, which must cover this URL's host.",
       "format": "uri",
       "pattern": "^https://"
     },
@@ -29,27 +29,25 @@
       "description": "Base64 of a detached OpenPGP signature by this key over \"keyoxide-directory listing v1\\ninstance=<instance>\\n\". The operator asking to be listed; checked by `npm run verify:entries`, never by the page.",
       "pattern": "^[A-Za-z0-9+/]+={0,2}$"
     },
-    "hkpEntry": {
+    "hkpSource": {
       "type": "object",
-      "description": "A key looked up on keys.openpgp.org by fingerprint.",
+      "description": "The key on keys.openpgp.org, looked up by fingerprint.",
       "additionalProperties": false,
-      "required": ["type", "fingerprint", "instance", "signature"],
+      "required": ["type", "fingerprint"],
       "properties": {
         "type": { "const": "hkp" },
         "fingerprint": {
           "type": "string",
           "description": "Long key id (16 hex) or full fingerprint (40 hex). Short key ids are rejected as collision-prone.",
           "pattern": "^([0-9A-Fa-f]{16}|[0-9A-Fa-f]{40})$"
-        },
-        "instance": { "$ref": "#/$defs/instance" },
-        "signature": { "$ref": "#/$defs/signature" }
+        }
       }
     },
-    "wkdEntry": {
+    "wkdSource": {
       "type": "object",
-      "description": "A key looked up in the domain's Web Key Directory. Carries the hashed local part, never the address itself.",
+      "description": "The key in a domain's Web Key Directory. Carries the hashed local part, never the address itself. Needs the serving host to send CORS headers.",
       "additionalProperties": false,
-      "required": ["type", "domain", "hash", "instance", "signature"],
+      "required": ["type", "domain", "hash"],
       "properties": {
         "type": { "const": "wkd" },
         "domain": {
@@ -61,14 +59,52 @@
           "type": "string",
           "description": "The z-base-32 SHA-1 of the lowercased local part. Compute it with `npm run wkd-hash <address>`.",
           "pattern": "^[ybndrfg8ejkmcpqxot1uwisza345h769]{32}$"
-        },
-        "instance": { "$ref": "#/$defs/instance" },
-        "signature": { "$ref": "#/$defs/signature" }
+        }
       }
     },
+    "daneSource": {
+      "type": "object",
+      "description": "The key as an RFC 7929 OPENPGPKEY record. Needs nothing of the operator's web server, but the zone must be DNSSEC-signed.",
+      "additionalProperties": false,
+      "required": ["type", "domain", "hash"],
+      "properties": {
+        "type": { "const": "dane" },
+        "domain": {
+          "type": "string",
+          "description": "The domain half of the operator's address, which the record name is built from.",
+          "format": "hostname"
+        },
+        "hash": {
+          "type": "string",
+          "description": "SHA-256 of the lowercased local part, truncated to 28 octets, in lowercase hex. Compute it with `npm run dane-hash <address>`.",
+          "pattern": "^[0-9a-f]{56}$"
+        }
+      }
+    },
+    "source": {
+      "description": "One place the operator's key can be fetched from.",
+      "oneOf": [
+        { "$ref": "#/$defs/daneSource" },
+        { "$ref": "#/$defs/wkdSource" },
+        { "$ref": "#/$defs/hkpSource" }
+      ]
+    },
     "entry": {
-      "description": "An entry names the lookup it wants: hkp for the keyserver, wkd for a Web Key Directory.",
-      "oneOf": [{ "$ref": "#/$defs/hkpEntry" }, { "$ref": "#/$defs/wkdEntry" }]
+      "type": "object",
+      "description": "A deployment, the operator's consent to list it, and where their key can be found.",
+      "additionalProperties": false,
+      "required": ["instance", "signature", "sources"],
+      "properties": {
+        "instance": { "$ref": "#/$defs/instance" },
+        "signature": { "$ref": "#/$defs/signature" },
+        "sources": {
+          "type": "array",
+          "description": "Tried dane, then wkd, then hkp, whatever order they are written in. They must all be the same key; `verify:entries` checks that.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/source" }
+        }
+      }
     }
   }
 }
