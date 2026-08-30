@@ -102,6 +102,23 @@ h1 {
   }
 }
 
+/*
+ * Cards are laid out by the grid, not by the stacked-panel rule above: that
+ * margin would be added on top of the grid's own gap and knock every card after
+ * the first out of alignment with its row.
+ *
+ * Equal rows keep a pinned card, which carries no key id, the same size as one
+ * that does, rather than leaving a short box next to a tall one.
+ */
+.grid {
+  grid-auto-rows: 1fr;
+}
+
+.grid .panel {
+  margin-top: 0;
+  height: 100%;
+}
+
 a {
   color: var(--accent-2);
   text-decoration: none;

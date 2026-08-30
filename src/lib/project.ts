@@ -1,22 +1,22 @@
 import type { DirectoryCard } from './resolve'
 
 /**
- * keyoxide.org, the project's own deployment.
+ * The Keyoxide project's own deployments.
  *
- * It cannot arrive through the ordinary route. An entry earns its card by
+ * They cannot arrive through the ordinary route. An entry earns its card by
  * carrying an `instance@dp42.dev` notation on an operator key, and the Keyoxide
  * project has no reason to sign a notation namespaced under this directory's
- * domain. Rather than leave the best-known deployment out of a directory of
- * deployments, it is pinned here.
+ * domain. Rather than leave the best-known deployments out of a directory of
+ * deployments, they are pinned here.
  *
- * It is kept out of the verified count for the same reason: nothing was
- * verified, and counting it would inflate the figure.
+ * They are kept out of the verified count for the same reason: nothing about
+ * them was verified, and counting them would inflate the figure.
  */
-export const PROJECT_INSTANCE = 'https://keyoxide.org'
+export const PROJECT_INSTANCES = ['https://keyoxide.org', 'https://dev.keyoxide.org']
 
-export const projectCard: DirectoryCard = {
-  declaredInstance: PROJECT_INSTANCE,
+export const projectCards: DirectoryCard[] = PROJECT_INSTANCES.map((instance) => ({
+  declaredInstance: instance,
   claimedInstance: null,
   fingerprint: null,
   status: 'project',
-}
+}))

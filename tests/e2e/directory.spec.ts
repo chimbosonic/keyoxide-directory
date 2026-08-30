@@ -42,9 +42,10 @@ const ENTRIES = [
  * one answers, one refuses the connection.
  */
 async function stubDeployments(page: Page) {
-  // The pinned project instance is a real deployment, so it is stubbed too and
-  // the suite still reaches nothing outside the browser.
+  // The pinned project instances are real deployments, so they are stubbed too
+  // and the suite still reaches nothing outside the browser.
   await page.route('**/keyoxide.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await page.route('**/dev.keyoxide.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
   await page.route('**/kx.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
   await page.route('**/plain.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
   await page.route('**/elsewhere.example.org/**', (route) => route.abort('connectionrefused'))
@@ -65,19 +66,48 @@ test.describe('directory', () => {
     await loadDirectory(page)
 
     await expect(page.getByTestId('instances')).toBeVisible()
-    // One per entry, plus the pinned project instance leading the grid.
-    await expect(page.getByRole('article')).toHaveCount(ENTRIES.length + 1)
+    // One per entry, plus the pinned project instances leading the grid.
+    await expect(page.getByRole('article')).toHaveCount(ENTRIES.length + 2)
     await expect(page.getByRole('article').first()).toContainText('keyoxide.org')
   })
 
-  test('pins keyoxide.org without counting it as verified', async ({ page }) => {
+  test('pins the project instances without counting them as verified', async ({ page }) => {
     await loadDirectory(page)
 
     const pinned = page.locator('[data-status="project"]')
-    await expect(pinned).toHaveCount(1)
-    await expect(pinned.getByRole('link')).toHaveAttribute('href', 'https://keyoxide.org')
-    await expect(pinned.getByTestId('verification')).toContainText('project instance')
+    await expect(pinned).toHaveCount(2)
+    await expect(pinned.nth(0).getByRole('link')).toHaveAttribute('href', 'https://keyoxide.org')
+    await expect(pinned.nth(1).getByRole('link')).toHaveAttribute(
+      'href',
+      'https://dev.keyoxide.org',
+    )
+    await expect(pinned.nth(0).getByTestId('verification')).toContainText('project instance')
     await expect(page.getByTestId('summary')).toHaveText(`1 of ${ENTRIES.length} verified`)
+  })
+
+  test('gives a pinned card the same height as a card carrying a key id', async ({ page }) => {
+    await loadDirectory(page)
+
+    const pinned = await page.locator('[data-status="project"]').first().boundingBox()
+    const verified = await page.locator('[data-status="verified"]').first().boundingBox()
+
+    // A pinned card carries no key id, which would otherwise leave it shorter
+    // than the cards beside it.
+    expect(pinned!.height).toBe(verified!.height)
+  })
+
+  test('aligns cards sharing a row', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 800 })
+    await loadDirectory(page)
+
+    const pinned = page.locator('[data-status="project"]')
+    const first = await pinned.nth(0).boundingBox()
+    const second = await pinned.nth(1).boundingBox()
+
+    // Two columns at this width, so these share a row. They drift apart if the
+    // stacked-panel margin is allowed to apply on top of the grid's own gap.
+    expect(second!.y).toBe(first!.y)
+    expect(second!.x).toBeGreaterThan(first!.x)
   })
 
   test('verifies a key whose notation matches the declared deployment', async ({ page }) => {
@@ -137,9 +167,9 @@ test.describe('directory', () => {
     await loadDirectory(page, [])
 
     await expect(page.getByTestId('empty')).toBeVisible()
-    // The directory is never truly empty: the pinned instance always renders.
-    await expect(page.getByRole('article')).toHaveCount(1)
-    await expect(page.locator('[data-status="project"]')).toBeVisible()
+    // The directory is never truly empty: the pinned instances always render.
+    await expect(page.getByRole('article')).toHaveCount(2)
+    await expect(page.locator('[data-status="project"]').first()).toBeVisible()
     await expect(page.getByTestId('summary')).toHaveText('0 of 0 verified')
   })
 

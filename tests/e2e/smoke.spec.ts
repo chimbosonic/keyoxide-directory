@@ -31,8 +31,8 @@ test('the built page renders the compiled-in entries without reaching the networ
   await stayOffline(page)
   await page.goto('/')
 
-  // Whatever keys.json holds, the pinned instance always renders, and a blocked
+  // Whatever keys.json holds, the pinned instances always render, and a blocked
   // lookup is reported rather than left spinning.
-  await expect(page.locator('[data-status="project"]')).toBeVisible()
+  await expect(page.locator('[data-status="project"]').first()).toBeVisible()
   await expect(page.getByTestId('loading')).toHaveCount(0)
 })

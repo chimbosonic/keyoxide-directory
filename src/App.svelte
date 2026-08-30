@@ -2,7 +2,7 @@
   import InstanceCard from './components/InstanceCard.svelte'
   import { loadEntries } from './lib/entries'
   import { probeAll, type Liveness } from './lib/probe'
-  import { PROJECT_INSTANCE, projectCard } from './lib/project'
+  import { PROJECT_INSTANCES, projectCards } from './lib/project'
   import { ADD_INSTANCE_URL, KEYS_FILE_URL } from './lib/repository'
   import type { DirectoryCard, ResolvedInstance } from './lib/resolve'
   import type { KeyEntry } from './lib/validateKeys'
@@ -37,8 +37,11 @@
 
       // Liveness runs after verification and never blocks it: a deployment being
       // slow to answer should not hold up rendering what its key says. The pinned
-      // instance is probed like any other: it has no key, but it can still be down.
-      prober([PROJECT_INSTANCE, ...resolved.map((instance) => instance.declaredInstance)]).then((probed) => {
+      // instances are probed like any other: they have no key, but can still be down.
+      prober([
+        ...PROJECT_INSTANCES,
+        ...resolved.map((instance) => instance.declaredInstance),
+      ]).then((probed) => {
         if (!cancelled) liveness = probed
       })
     })
@@ -54,7 +57,9 @@
     instances?.filter((instance) => instance.status === 'verified').length ?? 0,
   )
 
-  const cards = $derived<DirectoryCard[]>(instances === null ? [] : [projectCard, ...instances])
+  const cards = $derived<DirectoryCard[]>(
+    instances === null ? [] : [...projectCards, ...instances],
+  )
 </script>
 
 <div class="wrap">
@@ -79,7 +84,7 @@
     {#if instances === null}
       <p class="panel" data-testid="loading">Fetching keys…</p>
     {:else}
-      <!-- Never empty: the pinned project instance leads the grid. -->
+      <!-- Never empty: the pinned project instances lead the grid. -->
       <div class="grid" data-testid="instances">
         {#each cards as instance (instance.declaredInstance)}
           <InstanceCard {instance} liveness={liveness[instance.declaredInstance] ?? null} />

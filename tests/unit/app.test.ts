@@ -1,6 +1,6 @@
 import { render, screen, waitFor, within } from '@testing-library/svelte'
 import App from '../../src/App.svelte'
-import { PROJECT_INSTANCE } from '../../src/lib/project'
+import { PROJECT_INSTANCES } from '../../src/lib/project'
 import { ADD_INSTANCE_URL, KEYS_FILE_URL } from '../../src/lib/repository'
 import type { ResolvedInstance } from '../../src/lib/resolve'
 import type { KeyEntry } from '../../src/lib/validateKeys'
@@ -33,8 +33,9 @@ describe('App', () => {
     render(App, { entries: [], resolver: async () => [] })
 
     await waitFor(() => expect(screen.getByTestId('empty')).toBeInTheDocument())
-    expect(screen.getAllByRole('article')).toHaveLength(1)
+    expect(screen.getAllByRole('article')).toHaveLength(PROJECT_INSTANCES.length)
     expect(screen.getByRole('link', { name: 'keyoxide.org' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'dev.keyoxide.org' })).toBeInTheDocument()
   })
 
   it('always offers a route to adding an instance, not only when the list is empty', async () => {
@@ -78,13 +79,14 @@ describe('App', () => {
     await waitFor(() => expect(screen.getByTestId('instances')).toBeInTheDocument())
 
     const cards = screen.getAllByRole('article')
-    expect(cards).toHaveLength(3)
+    expect(cards).toHaveLength(PROJECT_INSTANCES.length + 2)
     expect(cards[0]).toHaveTextContent('keyoxide.org')
     expect(cards[0]).toHaveTextContent('project instance')
+    expect(cards[1]).toHaveTextContent('dev.keyoxide.org')
     expect(screen.queryByTestId('empty')).toBeNull()
   })
 
-  it('pins keyoxide.org without counting it as verified', async () => {
+  it('pins the project instances without counting them as verified', async () => {
     const resolver = async () => [resolved('https://one.example.org')]
 
     render(App, { entries: [], resolver })
@@ -120,7 +122,7 @@ describe('App', () => {
     render(App, { entries: [], resolver, prober })
 
     await waitFor(() =>
-      expect(prober).toHaveBeenCalledWith([PROJECT_INSTANCE, 'https://one.example.org']),
+      expect(prober).toHaveBeenCalledWith([...PROJECT_INSTANCES, 'https://one.example.org']),
     )
   })
 
@@ -139,7 +141,9 @@ describe('App', () => {
 
     render(App, { entries: [], resolver, prober })
 
-    await waitFor(() => expect(screen.getAllByRole('article')).toHaveLength(2))
+    await waitFor(() =>
+      expect(screen.getAllByRole('article')).toHaveLength(PROJECT_INSTANCES.length + 1),
+    )
     expect(screen.queryByTestId('liveness')).toBeNull()
   })
 })
