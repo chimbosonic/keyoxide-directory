@@ -19,7 +19,6 @@ describe('InstanceCard, pinned project instance', () => {
     claimedInstance: null,
     fingerprint: null,
     status: 'project',
-    reason: "the Keyoxide project's own deployment",
   }
 
   it('links to the instance and labels it as the project instance', () => {
@@ -116,7 +115,7 @@ describe('InstanceCard', () => {
     expect(screen.getByText('key not retrieved')).toBeInTheDocument()
   })
 
-  it('renders the reason for a failure', () => {
+  it('does not restate the failure underneath the pill', () => {
     render(InstanceCard, {
       instance: resolved({
         status: 'fetch-error',
@@ -126,7 +125,23 @@ describe('InstanceCard', () => {
       }),
     })
 
-    expect(screen.getByText('Failed to fetch')).toBeInTheDocument()
+    // The reason is still carried on the resolved entry, for tests and the live
+    // check; the card simply does not render it.
+    expect(screen.queryByText('Failed to fetch')).toBeNull()
+    expect(screen.getByTestId('verification')).toHaveTextContent('lookup failed')
+  })
+
+  it('does not restate a no-notation key underneath the pill', () => {
+    render(InstanceCard, {
+      instance: resolved({
+        status: 'no-notation',
+        claimedInstance: null,
+        reason: 'key claims no deployment',
+      }),
+    })
+
+    expect(screen.queryByText('key claims no deployment')).toBeNull()
+    expect(screen.getByTestId('verification')).toHaveTextContent('no claim on key')
   })
 
   it('shows no liveness pill until a probe has answered', () => {

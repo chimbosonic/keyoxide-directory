@@ -19,5 +19,4 @@ export const projectCard: DirectoryCard = {
   claimedInstance: null,
   fingerprint: null,
   status: 'project',
-  reason: "the Keyoxide project's own deployment",
 }

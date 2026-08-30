@@ -61,12 +61,16 @@
     <p class="muted">key not retrieved</p>
   {/if}
 
+  <!--
+    No reason line. The status pill already names what went wrong, and repeating
+    it underneath in other words ("no claim on key" / "key claims no deployment")
+    added noise rather than information. The competing deployment stays, because
+    which one a key claims is not something the pill can say.
+  -->
   {#if instance.status === 'mismatch' && instance.claimedInstance}
     <p class="muted">
       key claims <span class="code inline">{instance.claimedInstance}</span>
     </p>
-  {:else if instance.reason}
-    <p class="muted">{instance.reason}</p>
   {/if}
 </article>
 
