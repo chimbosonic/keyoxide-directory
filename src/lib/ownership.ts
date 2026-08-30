@@ -24,7 +24,7 @@
  * way a page with no backend can read DNS at all. The trust it carries is not
  * cryptographic, and the caveat is written up there.
  */
-import { TXT, queryDoh, type DohOptions } from './doh'
+import { TXT, queryDoh, type DohOptions } from './doh.ts'
 
 /** Keyoxide's own fingerprint URI syntax, reused rather than invented. */
 export const FINGERPRINT_URI = 'openpgp4fpr:'

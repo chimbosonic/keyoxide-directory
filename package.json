@@ -14,7 +14,8 @@
     "test": "npm run test:unit && npm run test:e2e",
     "validate:keys": "node scripts/validate-keys.ts",
     "verify:entries": "node scripts/verify-entries.ts",
-    "wkd-hash": "node scripts/wkd-hash.ts"
+    "wkd-hash": "node scripts/wkd-hash.ts",
+    "dane-hash": "node scripts/dane-hash.ts"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
