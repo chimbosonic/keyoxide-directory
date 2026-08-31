@@ -1,0 +1,25 @@
+{
+  "$schema": "./keys.schema.json",
+  "keys": [
+    {
+      "instance": "https://keyoxide.dp42.dev",
+      "signature": "iQIzBAABCgAdFiEErEi8HwKbYYjZfi2AfIVdtEZt8MYFAmqUmOsACgkQfIVdtEZt8MZ+WA/+OBGVc4PvGzo4YM5UmVJclAfihG8O3kbEM8AqSSf50CGYACTQVUYsyh5NHThfNp+rDvOEXSzFmcXp8YhL6wSKNFUh8M69VTAoxfGOYG0+advYFDptUUTYFUdFk33mrdpXqAXoJ2/q7yLoZqxw8xo0Dg31SEI6JSe9SyYDJeOfOk7jRtCg2CeD5eNTN73jIGSr41RncUxyFnHW9a3X7ufpYLuVwoJNvMdwGV94Jqcf4vEa121mSw1NWJQ5jV3ExCzpFoW+t0wLP/dgFRIYR1NwizwJaktytgajybKfkf4tH+2ncay1kbbmN2SDUEGsd4e8B9hRg81pecwmz7dBLXcKoljea5g5psN/xWaXrIwt2o8hbx4zzywptKp3xJltidFrNLii7iEsMn555FbPjf8t1hxoYtS9t2r0Vw4oK2mBJ124BYI8oOnby53Q1fUf121M8DZ+NjFlPAt/JVBreqqdFCkIDjcBJljolW/a/MFafeedeZEvhUcrLZlfs/t9/E7LcvoiVVvjERhyrRmt0fN49R9nOHmq06ypGdXc3jh2gsCN1APfjQAsHpCiyiyRy42gxkfAtd15yH8RbV+/dRCfwM8L3U34hgeklGxtOD7lITWKZI+SoG8a/6r6FdibVoezDdZ/6zVWKAn9Hjifpuw1pETMe8uv4n4WsHcjMp3i1Vc=",
+      "sources": [
+        {
+          "type": "dane",
+          "domain": "chimbosonic.com",
+          "hash": "b6d6c17906cb77f0ced99ca37acaf240e129845cc2429402e9da4192"
+        },
+        {
+          "type": "wkd",
+          "domain": "dp42.dev",
+          "hash": "z9naq3iddua5t55b3hp1w3hwz8eyrc7n"
+        },
+        {
+          "type": "hkp",
+          "fingerprint": "AC48BC1F029B6188D97E2D807C855DB4466DF0C6"
+        }
+      ]
+    }
+  ]
+}

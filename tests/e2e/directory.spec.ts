@@ -1,0 +1,361 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
+import { expect, test, type Page } from '@playwright/test'
+
+const here = dirname(fileURLToPath(import.meta.url))
+const fixture = (name: string) =>
+  readFileSync(resolve(here, '../fixtures/keys', `${name}.asc`), 'utf8')
+
+/** Proves kx.example.org. */
+const PROOF = '125201CAF360D90D52549F62A0A332F5361EB31F'
+/** Proves multi.example.org among others — a parent of one deployment below. */
+const PROOFS = '7853FDF799B81400814C279B187149C137000B9D'
+/** Proves nothing. */
+const PLAIN = 'E9B57E7488818FE8A72CB8A20A6899A0D2FBBD4E'
+const MISSING = 'FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF'
+
+/**
+ * The keyserver is intercepted so the suite is deterministic and runs offline;
+ * everything below the network — the real bundle, OpenPGP.js, the proof read and
+ * the status classification — runs for real.
+ */
+/**
+ * The record each domain publishes, keyed by the domain itself: a proof names
+ * its own domain, so that is the name the page asks a resolver about. Stubbed
+ * like everything else so the suite stays offline; the value is the syntax a
+ * real resolver returns.
+ */
+async function stubResolvers(page: Page, owners: Record<string, string>) {
+  await page.route(/dns\.google|cloudflare-dns\.com/, (route) => {
+    const query = new URL(route.request().url()).searchParams
+    const name = (query.get('name') ?? '').replace(/\.$/, '')
+
+    // OPENPGPKEY, the DANE key route. Nothing here publishes one, so the answer
+    // is always empty and every entry falls through to its next source.
+    if (query.get('type') === '61') {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/dns-json',
+        body: JSON.stringify({ Status: 0, AD: true }),
+      })
+    }
+
+    const owner = owners[name]
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/dns-json',
+      body: JSON.stringify(
+        owner === undefined
+          ? { Status: 0, AD: true }
+          : { Status: 0, AD: true, Answer: [{ type: 16, data: `"openpgp4fpr:${owner}"` }] },
+      ),
+    })
+  })
+}
+
+async function stubKeyserver(page: Page) {
+  await page.route('**/keys.openpgp.org/**', async (route) => {
+    const url = route.request().url()
+
+    for (const [fingerprint, name] of [
+      [PROOF, 'proof'],
+      [PROOFS, 'proofs'],
+      [PLAIN, 'plain'],
+    ] as const) {
+      if (url.includes(fingerprint)) {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/pgp-keys',
+          body: fixture(name),
+        })
+      }
+    }
+    return route.fulfill({ status: 404, body: '' })
+  })
+}
+
+/** Shaped like a real one; the page never reads it, only verify:entries does. */
+const SIGNATURE = 'iHUEABYKAB0WIQQSUgHK82DZDVJUn2KgozL1Nh6zHwUCaLL/AAoJEA=='
+
+const listing = (instance: string, ...sources: unknown[]) => ({
+  instance,
+  signature: SIGNATURE,
+  sources,
+})
+
+const hkp = (fingerprint: string) => ({ type: 'hkp', fingerprint })
+
+/** RFC 7929's own example hash, standing in for a record nobody publishes here. */
+const DANE_HASH = 'c93f1e400f26708f98cb19d936620da35eec8f72e57f9eec01c1afd6'
+
+const ENTRIES = [
+  // Declares DANE ahead of the keyserver: nothing answers over DANE in this
+  // suite, so reaching verified proves the chain fell through to the next source.
+  listing(
+    'https://kx.example.org',
+    { type: 'dane', domain: 'kx.example.org', hash: DANE_HASH },
+    hkp(PROOF),
+  ),
+  listing('https://kx.multi.example.org', hkp(PROOFS)),
+  listing('https://elsewhere.example.org', hkp(PROOF)),
+  listing('https://plain.example.org', hkp(PLAIN)),
+  listing('https://gone.example.org', hkp(MISSING)),
+]
+
+/**
+ * Deployments are stubbed too, so the suite never touches the real network:
+ * one answers, one refuses the connection.
+ */
+async function stubDeployments(page: Page) {
+  // The pinned project instances are real deployments, so they are stubbed too
+  // and the suite still reaches nothing outside the browser.
+  await page.route('**/keyoxide.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await page.route('**/dev.keyoxide.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await page.route('**/kx.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await page.route('**/kx.multi.example.org/**', (route) =>
+    route.fulfill({ status: 200, body: 'ok' }),
+  )
+  await page.route('**/plain.example.org/**', (route) => route.fulfill({ status: 200, body: 'ok' }))
+  await page.route('**/elsewhere.example.org/**', (route) => route.abort('connectionrefused'))
+  await page.route('**/gone.example.org/**', (route) => route.abort('connectionrefused'))
+}
+
+/**
+ * Two domains confirm, each naming the key that proves it. multi.example.org is
+ * the parent of a deployment at kx.multi.example.org, which is the case where a
+ * proof reaches further down than the domain it was published for.
+ */
+const OWNERS: Record<string, string> = {
+  'kx.example.org': PROOF,
+  'multi.example.org': PROOFS,
+}
+
+async function loadDirectory(
+  page: Page,
+  entries: unknown[] = ENTRIES,
+  owners: Record<string, string> = OWNERS,
+) {
+  await stubKeyserver(page)
+  await stubResolvers(page, owners)
+  await stubDeployments(page)
+  await page.addInitScript((seed) => {
+    ;(window as unknown as Record<string, unknown>)['__KEYOXIDE_DIRECTORY_ENTRIES__'] = seed
+  }, entries)
+  await page.goto('/')
+}
+
+test.describe('directory', () => {
+  test('renders one card per entry', async ({ page }) => {
+    await loadDirectory(page)
+
+    await expect(page.getByTestId('instances')).toBeVisible()
+    // One per entry, plus the pinned project instances leading the grid.
+    await expect(page.getByRole('article')).toHaveCount(ENTRIES.length + 2)
+    await expect(page.getByRole('article').first()).toContainText('keyoxide.org')
+  })
+
+  test('pins the project instances without counting them as verified', async ({ page }) => {
+    await loadDirectory(page)
+
+    const pinned = page.locator('[data-status="project"]')
+    await expect(pinned).toHaveCount(2)
+    await expect(pinned.nth(0).getByRole('link')).toHaveAttribute('href', 'https://keyoxide.org')
+    await expect(pinned.nth(1).getByRole('link')).toHaveAttribute(
+      'href',
+      'https://dev.keyoxide.org',
+    )
+    await expect(pinned.nth(0).getByTestId('verification')).toContainText('project instance')
+    await expect(page.getByTestId('summary')).toHaveText(`2 of ${ENTRIES.length} verified`)
+  })
+
+  test('gives a pinned card the same height as a card carrying a key id', async ({ page }) => {
+    await loadDirectory(page)
+
+    const pinned = await page.locator('[data-status="project"]').first().boundingBox()
+    const verified = await page.locator('[data-status="verified"]').first().boundingBox()
+
+    // A pinned card carries no key id, which would otherwise leave it shorter
+    // than the cards beside it.
+    expect(pinned!.height).toBe(verified!.height)
+  })
+
+  test('aligns cards sharing a row', async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 800 })
+    await loadDirectory(page)
+
+    const pinned = page.locator('[data-status="project"]')
+    const first = await pinned.nth(0).boundingBox()
+    const second = await pinned.nth(1).boundingBox()
+
+    // Two columns at this width, so these share a row. They drift apart if the
+    // stacked-panel margin is allowed to apply on top of the grid's own gap.
+    expect(second!.y).toBe(first!.y)
+    expect(second!.x).toBeGreaterThan(first!.x)
+  })
+
+  test('verifies a key that proves the deployment’s own host', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="verified"]', { hasText: 'kx.example.org' }).first()
+    await expect(card.getByTestId('verification')).toHaveText('verified')
+    await expect(card.getByTestId('key-id')).toHaveText('0xA0A3 32F5 361E B31F')
+    await expect(card.getByRole('link')).toHaveAttribute('href', 'https://kx.example.org')
+  })
+
+  test('names the parent domain when a proof reaches down to a subdomain', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="verified"]', { hasText: 'kx.multi.example.org' })
+    await expect(card.getByTestId('verification')).toHaveText('verified via multi.example.org')
+  })
+
+  test('refuses to verify a key the domain says nothing about', async ({ page }) => {
+    // The impersonation case, end to end: a key whose proof names a domain it
+    // does not control. The notation alone is one party talking to itself, so
+    // without a record from the domain it must not read as verified.
+    await loadDirectory(page, ENTRIES, {})
+
+    await expect(page.locator('[data-status="verified"]')).toHaveCount(0)
+    const card = page.locator('[data-status="unconfirmed"]')
+    await expect(card).toHaveCount(2)
+    await expect(card.first().getByTestId('verification')).toContainText(
+      'domain name does not confirm key',
+    )
+    await expect(page.getByTestId('summary')).toHaveText(`0 of ${ENTRIES.length} verified`)
+  })
+
+  test('flags a domain that names a different key', async ({ page }) => {
+    await loadDirectory(page, ENTRIES, { ...OWNERS, 'kx.example.org': PLAIN })
+
+    const card = page.locator('[data-status="contested"]')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('verification')).toContainText('domain name links another key')
+  })
+
+  test('flags a key that proves no domain covering the deployment', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="mismatch"]')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('verification')).toContainText('key proves another domain')
+    await expect(card).toContainText('kx.example.org')
+  })
+
+  /**
+   * A DANE record is refused outright when the resolver will not vouch for the
+   * zone, and with no other source there is nothing to fall through to.
+   */
+  test('refuses a dane record on a zone the resolver will not vouch for', async ({ page }) => {
+    await page.route(/dns\.google|cloudflare-dns\.com/, (route) => {
+      const query = new URL(route.request().url()).searchParams
+      if (query.get('type') !== '61') {
+        return route.fulfill({
+          status: 200,
+          contentType: 'application/dns-json',
+          body: JSON.stringify({ Status: 0, AD: true }),
+        })
+      }
+
+      // A record is there; the zone is not signed.
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/dns-json',
+        body: JSON.stringify({
+          Status: 0,
+          AD: false,
+          Answer: [{ type: 61, data: '\\# 2 abcd' }],
+        }),
+      })
+    })
+    await stubDeployments(page)
+    await page.addInitScript((seed) => {
+      ;(window as unknown as Record<string, unknown>)['__KEYOXIDE_DIRECTORY_ENTRIES__'] = seed
+    }, [listing('https://kx.example.org', { type: 'dane', domain: 'kx.example.org', hash: DANE_HASH })])
+    await page.goto('/')
+
+    const card = page.locator('[data-status="unvalidated"]')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('verification')).toContainText('key record not dnssec-signed')
+  })
+
+  test('flags a key carrying no proof', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="no-notation"]')
+    await expect(card).toHaveCount(1)
+    await expect(card.getByTestId('verification')).toContainText('no domain proof on key')
+  })
+
+  test('flags a key the keyserver does not have', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="not-found"]')
+    await expect(card).toHaveCount(1)
+    await expect(card).toContainText('key not retrieved')
+  })
+
+  test('summarises the verified count', async ({ page }) => {
+    await loadDirectory(page)
+
+    await expect(page.getByTestId('summary')).toHaveText('2 of 5 verified')
+  })
+
+  test('never renders an operator address or a full fingerprint', async ({ page }) => {
+    await loadDirectory(page)
+    await expect(page.getByTestId('instances')).toBeVisible()
+
+    const body = (await page.locator('body').textContent()) ?? ''
+    expect(body).not.toContain('example.invalid')
+    expect(body).not.toContain('Fixture')
+    expect(body).not.toContain(PROOF)
+    expect(body).not.toContain(PROOFS)
+    expect(body).not.toContain(PLAIN)
+  })
+
+  test('shows the empty state when nothing is listed, alongside the pinned card', async ({
+    page,
+  }) => {
+    await loadDirectory(page, [])
+
+    await expect(page.getByTestId('empty')).toBeVisible()
+    // The directory is never truly empty: the pinned instances always render.
+    await expect(page.getByRole('article')).toHaveCount(2)
+    await expect(page.locator('[data-status="project"]').first()).toBeVisible()
+    await expect(page.getByTestId('summary')).toHaveText('0 of 0 verified')
+  })
+
+  test('offers a route to adding an instance', async ({ page }) => {
+    await loadDirectory(page)
+
+    const cta = page.getByTestId('add-instance')
+    await expect(cta).toBeVisible()
+    await expect(cta.getByRole('link', { name: /add it to the directory/i })).toHaveAttribute(
+      'href',
+      /github\.com\/chimbosonic\/keyoxide-directory/,
+    )
+  })
+
+  test('marks a deployment that answers as online', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="verified"]').first()
+    await expect(card.getByTestId('liveness')).toHaveText('online')
+  })
+
+  test('marks a deployment that refuses the connection as unreachable', async ({ page }) => {
+    await loadDirectory(page)
+
+    const card = page.locator('[data-status="mismatch"]')
+    await expect(card.getByTestId('liveness')).toHaveText('unreachable')
+  })
+
+  test('probes independently of verification', async ({ page }) => {
+    await loadDirectory(page)
+
+    // The key proves nothing, but the deployment itself is up.
+    const card = page.locator('[data-status="no-notation"]')
+    await expect(card.getByTestId('verification')).toContainText('no domain proof on key')
+    await expect(card.getByTestId('liveness')).toHaveText('online')
+  })
+})
