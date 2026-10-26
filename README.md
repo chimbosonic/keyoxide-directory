@@ -1,4 +1,6 @@
-# Keyoxide Instance Directory
+# Keyoxide Instance Directory - Deprecated
+
+This has been replaced by https://codeberg.org/chimbosonic/keyoxide-instance-discorvery-profile
 
 A directory of [Keyoxide](https://keyoxide.org) deployments, verified in your
 browser. There is no backend: the page ships with a list of operator key
